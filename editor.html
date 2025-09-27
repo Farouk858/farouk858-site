@@ -6,37 +6,34 @@
   <title>858 Builder</title>
 
   <!-- GrapesJS core CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/grapesjs/dist/css/grapes.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
   <style>
     html, body { height:100%; margin:0; background:#0b0b0b; }
     #gjs { height:100vh; }
-    /* Darken canvas background for contrast */
     .gjs-cv-canvas { background:#111; }
   </style>
 </head>
 <body>
   <div id="gjs"></div>
 
-  <!-- Global auth helper: Shift+A works on any page -->
+  <!-- Global auth helper (Shift+A anywhere) -->
   <script src="js/auth.js"></script>
 
   <!-- GrapesJS core -->
-  <script src="https://unpkg.com/grapesjs"></script>
+  <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
 
-  <!-- Official/free plugin bundle for common blocks/features -->
-  <script src="https://unpkg.com/grapesjs-blocks-basic"></script>
-  <script src="https://unpkg.com/grapesjs-plugin-forms"></script>
-  <script src="https://unpkg.com/grapesjs-navbar"></script>
-  <script src="https://unpkg.com/grapesjs-tabs"></script>
-  <script src="https://unpkg.com/grapesjs-custom-code"></script>
-
-  <!-- model-viewer script will be injected inside the canvas by editor.js -->
+  <!-- Optional plugins (UMD globals listed below) -->
+  <script src="https://unpkg.com/grapesjs-blocks-basic@1.0.2"></script>       <!-- global: grapesjsBlocksBasic -->
+  <script src="https://unpkg.com/grapesjs-plugin-forms@2.0.6"></script>       <!-- global: grapesjsPluginForms -->
+  <script src="https://unpkg.com/grapesjs-navbar@1.0.9"></script>             <!-- global: grapesjsNavbar -->
+  <script src="https://unpkg.com/grapesjs-tabs@1.0.6"></script>               <!-- global: grapesjsTabs -->
+  <script src="https://unpkg.com/grapesjs-custom-code@1.0.3"></script>        <!-- global: grapesjsCustomCode -->
 
   <!-- Your custom plugins -->
-  <script src="js/model-plugin.js"></script>    <!-- 3D model block -->
-  <script src="js/blocks-plugin.js"></script>   <!-- layout/media blocks -->
+  <script src="js/model-plugin.js"></script>    <!-- exposes window.modelViewerPlugin -->
+  <script src="js/blocks-plugin.js"></script>   <!-- exposes window.blocksPlugin -->
 
-  <!-- Main editor (Pages, Save to GitHub, etc.) -->
+  <!-- Main editor (defensive plugin loading) -->
   <script src="js/editor.js"></script>
 </body>
 </html>
