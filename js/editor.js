@@ -1,5 +1,5 @@
 /* =========================================================================
-   858 Builder — editor.js (Pages Manager + 3D + GitHub save)
+   858 Builder — editor.js (defensive plugins + pages + save)
    ======================================================================= */
 
 /* ---------- CONFIG ---------- */
@@ -12,6 +12,20 @@ const GH_BRANCH  = 'main';
 // Track which file you’re editing right now
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
+/* ---------------- Collect plugins safely ---------------- */
+const pluginFns = [];
+
+// Official/CDN plugins expose these UMD globals:
+if (window.grapesjsBlocksBasic)  pluginFns.push(window.grapesjsBlocksBasic);
+if (window.grapesjsPluginForms)  pluginFns.push(window.grapesjsPluginForms);
+if (window.grapesjsNavbar)       pluginFns.push(window.grapesjsNavbar);
+if (window.grapesjsTabs)         pluginFns.push(window.grapesjsTabs);
+if (window.grapesjsCustomCode)   pluginFns.push(window.grapesjsCustomCode);
+
+// Your plugins:
+if (window.modelViewerPlugin)    pluginFns.push(window.modelViewerPlugin);
+if (window.blocksPlugin)         pluginFns.push(window.blocksPlugin);
+
 /* ---------------- GrapesJS INIT ---------------- */
 const editor = grapesjs.init({
   container: '#gjs',
@@ -21,16 +35,15 @@ const editor = grapesjs.init({
   storageManager: { type: 'local', autosave: true, autoload: true, stepsBeforeSave: 1 },
 
   assetManager: {
-    // Drag/drop or “Choose file” will embed data-urls (works with GIF/WebP/PNG/JPG/SVG/MP4 poster etc.)
-    upload: false,
+    upload: false,          // base64-embed for quick free hosting
     embedAsBase64: true,
     autoAdd: true,
   },
 
   styleManager: {
     sectors: [
-      { name: 'Layout', open: true, buildProps: ['display','position','top','left','right','bottom','width','height','margin','padding'] },
-      { name: 'Typography', open: false, buildProps: ['font-family','font-size','font-weight','color','line-height','letter-spacing','text-align'] },
+      { name: 'Layout',      open: true,  buildProps: ['display','position','top','left','right','bottom','width','height','margin','padding'] },
+      { name: 'Typography',  open: false, buildProps: ['font-family','font-size','font-weight','color','line-height','letter-spacing','text-align'] },
       { name: 'Decorations', open: false, buildProps: ['background-color','background-image','border','border-radius','box-shadow','opacity'] },
     ]
   },
@@ -40,18 +53,10 @@ const editor = grapesjs.init({
     scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
   },
 
-  // Enable official + custom plugins
-  plugins: [
-    'gjs-blocks-basic',       // section, image, text, video, link, etc.
-    'grapesjs-plugin-forms',
-    'grapesjs-navbar',
-    'grapesjs-tabs',
-    'grapesjs-custom-code',
-    window.modelViewerPlugin, // 3D block
-    window.blocksPlugin       // our layout/media blocks
-  ],
+  plugins: pluginFns,
   pluginsOpts: {
-    'gjs-blocks-basic': { flexGrid: true },
+    // Options only applied if the plugin is present:
+    [window.grapesjsBlocksBasic ? window.grapesjsBlocksBasic : '']: { flexGrid: true },
   },
 });
 
@@ -62,7 +67,7 @@ if (!editor.getComponents().length) {
       <h1 style="font-family:system-ui;margin:0 0 16px;">farouk858 — new portfolio</h1>
       <p style="font-family:system-ui;opacity:.8;margin:0 0 24px;">
         Shortcuts: <strong>Shift+A</strong> Sign in · <strong>Shift+S</strong> Save ·
-        <strong>Shift+N</strong> New page · <strong>Shift+O</strong> Open Pages · <strong>Shift+P</strong> Save As
+        <strong>Shift+N</strong> New page · <strong>Shift+O</strong> Pages · <strong>Shift+P</strong> Save As
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
         <model-viewer src="models/sample.glb" alt="Sample"
@@ -71,7 +76,7 @@ if (!editor.getComponents().length) {
           exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
         <div>
           <h2 style="font-family:system-ui;margin-top:0;">Drag blocks → right panel</h2>
-          <p style="font-family:system-ui;">Use Layout/Media/Elements to compose pages.</p>
+          <p style="font-family:system-ui;">Use Layout/Media/Elements/3D to compose pages.</p>
         </div>
       </div>
     </section>
@@ -294,6 +299,7 @@ document.body.appendChild(fab);
 
 /* ---------------- Keyboard shortcuts ---------------- */
 document.addEventListener('keydown', (e) => {
+  if (e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); window.location.href = `${WORKER_URL}/login`; }
   if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(); }
   if (e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault();
     const slug = prompt('New page slug (e.g. about):'); if (!slug) return;
