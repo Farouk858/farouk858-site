@@ -1,49 +1,38 @@
 /* =========================================================================
-   858 Builder — editor.js (full)
-   - GrapesJS init (+ <model-viewer> inside canvas)
-   - 3D Model plugin enabled
-   - Export HTML button
-   - OAuth login (Shift + A) via Cloudflare Worker
-   - Save to GitHub (Shift + S) -> writes index.html (with 409 retry)
-   - Simple multipage: Shift + N (new), Shift + O (open)
+   858 Builder — editor.js (Pages Manager + 3D + GitHub save)
    ======================================================================= */
 
-/* ---------- CONFIG: EDIT IF NEEDED ---------- */
+/* ---------- CONFIG ---------- */
 const WORKER_URL = 'https://858-builder.faroukalaofa.workers.dev';
 const GH_OWNER   = 'farouk858';
 const GH_REPO    = 'farouk858-site';
 const GH_BRANCH  = 'main';
-/* ------------------------------------------- */
+/* --------------------------- */
 
-// -------------------- GrapesJS INIT --------------------
+// Track which file you’re editing right now
+let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
+
+/* ---------------- GrapesJS INIT ---------------- */
 const editor = grapesjs.init({
   container: '#gjs',
   height: '100vh',
   fromElement: false,
-  storageManager: {
-    type: 'local',
-    autosave: true,
-    autoload: true,
-    stepsBeforeSave: 1
-  },
+  storageManager: { type: 'local', autosave: true, autoload: true, stepsBeforeSave: 1 },
   canvas: {
-    scripts: [
-      // Make <model-viewer> available inside the editor canvas
-      'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'
-    ]
+    scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
   },
-  // Enable your 3D Model block plugin (provided by js/model-plugin.js)
-  plugins: [window.modelViewerPlugin],
+  plugins: [window.modelViewerPlugin],  // your 3D block
   pluginsOpts: {},
 });
 
-// Starter content (only if empty)
+/* Starter content (only once) */
 if (!editor.getComponents().length) {
   editor.setComponents(`
     <section style="padding:40px; color:white; background:#000">
       <h1 style="font-family:system-ui;margin:0 0 16px;">farouk858 — new portfolio</h1>
       <p style="font-family:system-ui;opacity:.8;margin:0 0 24px;">
-        <strong>Shortcuts:</strong> Shift + A (Sign in) · Shift + S (Save) · Shift + N (New page) · Shift + O (Open page)
+        Shortcuts: <strong>Shift+A</strong> Sign in · <strong>Shift+S</strong> Save ·
+        <strong>Shift+N</strong> New page · <strong>Shift+O</strong> Open · <strong>Shift+P</strong> Save As
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
         <model-viewer src="models/sample.glb" alt="Sample"
@@ -52,21 +41,21 @@ if (!editor.getComponents().length) {
           exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
         <div>
           <h2 style="font-family:system-ui;margin-top:0;">Content</h2>
-          <p style="font-family:system-ui;">Add blocks, then export or save to GitHub.</p>
+          <p style="font-family:system-ui;">Add blocks, then save pages with the Pages Manager.</p>
         </div>
       </div>
     </section>
   `);
 }
 
-// Add a simple “Page Link” block
+/* Simple “Page Link” block */
 editor.BlockManager.add('page-link', {
   label: 'Page Link',
   category: 'Navigation',
   content: `<a href="/pages/about.html" style="color:#7ee787;font-family:system-ui;text-decoration:none">Go to About →</a>`
 });
 
-// -------------------- Tiny toast --------------------
+/* ---------------- UI helpers ---------------- */
 function toast(msg, ms = 1800) {
   let el = document.getElementById('gh-toast');
   if (!el) {
@@ -86,29 +75,7 @@ function toast(msg, ms = 1800) {
   el._t = setTimeout(() => (el.style.opacity = '0'), ms);
 }
 
-// -------------------- Export (download) button --------------------
-const pn = editor.Panels;
-pn.addButton('options', {
-  id: 'export-html',
-  className: 'fa fa-download',
-  attributes: { title: 'Export HTML' },
-  command: editor => {
-    const html = editor.getHtml({ cleanId: true });
-    const css  = editor.getCss();
-    const blob = new Blob(
-      [`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"><\/script><style>${css}</style></head><body>${html}</body></html>`],
-      { type: 'text/html' }
-    );
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'exported.html';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('Exported HTML downloaded.');
-  }
-});
-
-// -------------------- Auth helpers --------------------
+/* ---------------- Auth helpers ---------------- */
 function getTokenFromHash() {
   if (location.hash && location.hash.includes('access_token=')) {
     const match = location.hash.match(/access_token=([^&]+)/);
@@ -123,45 +90,9 @@ function getTokenFromHash() {
 }
 function isAuthed() { return !!getTokenFromHash(); }
 
-// -------------------- GitHub API helpers --------------------
-async function getFileSha({ token, owner, repo, path, branch = 'main' }) {
-  // cache-bust with Date.now to avoid any proxy cache on GET
-  const r = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}&_=${Date.now()}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
-  );
-  if (r.status === 404) return null; // new file
-  if (!r.ok) throw new Error('Failed to load file: ' + r.status);
-  const j = await r.json();
-  return j.sha || null;
-}
-
-async function putFile({ token, owner, repo, path, content, message, branch = 'main', sha = null }) {
-  const body = {
-    message,
-    branch,
-    content: btoa(unescape(encodeURIComponent(content))) // base64
-  };
-  if (sha) body.sha = sha;
-
-  const r = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      body: JSON.stringify(body)
-    }
-  );
-
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`PUT failed ${r.status}: ${txt}`);
-  }
-  return r.json();
-}
-
-// Convenience GET to download a file (used by multipage loader)
-async function ghGetFileMeta(token, path) {
+/* ---------------- GitHub API helpers ---------------- */
+async function ghGet(path) {
+  const token = getTokenFromHash();
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
@@ -171,148 +102,251 @@ async function ghGetFileMeta(token, path) {
   return r.json();
 }
 
-// -------------------- Save to GitHub (with 409 retry) --------------------
-async function saveToGitHub() {
-  const token = getTokenFromHash();
-  if (!token) { toast('Not signed in. Press Shift + A to sign in.'); return; }
+async function getFileSha(path) {
+  const meta = await ghGet(path);
+  return meta && meta.sha ? meta.sha : null;
+}
 
+async function putFile({ path, content, message, sha }) {
+  const token = getTokenFromHash();
+  const body = {
+    message,
+    branch: GH_BRANCH,
+    content: btoa(unescape(encodeURIComponent(content))),
+  };
+  if (sha) body.sha = sha;
+
+  const r = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      body: JSON.stringify(body)
+    }
+  );
+  if (!r.ok) throw new Error(`PUT failed ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function listPages() {
+  const root = await ghGet('');
+  const pagesDir = await ghGet('pages');
+  const items = [];
+
+  if (root && Array.isArray(root)) {
+    const idx = root.find(f => f.name === 'index.html');
+    if (idx) items.push({ name: 'index.html', path: 'index.html' });
+  }
+  if (pagesDir && Array.isArray(pagesDir)) {
+    pagesDir
+      .filter(f => f.type === 'file' && f.name.endsWith('.html'))
+      .forEach(f => items.push({ name: f.name, path: `pages/${f.name}` }));
+  }
+  return items;
+}
+
+/* ---------------- Save/Load pages ---------------- */
+function buildDocFromEditor() {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
-
-  const page = `<!doctype html>
+  return `<!doctype html>
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>farouk858 — portfolio</title>
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 <style>${css}</style>
 </head><body>
 ${html}
 </body></html>`.trim();
-
-  const path = 'index.html';
-
-  const doPut = (sha) => putFile({
-    token, owner: GH_OWNER, repo: GH_REPO, path,
-    content: page,
-    message: 'chore: save from visual editor',
-    branch: GH_BRANCH,
-    sha: sha || undefined
-  });
-
-  try {
-    // 1) Fetch latest SHA (null if file doesn't exist)
-    let sha = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
-
-    // 2) Attempt save
-    try {
-      await doPut(sha);
-      toast('Saved to GitHub ✔  (Pages will update shortly)');
-      return;
-    } catch (err) {
-      // 3) If conflict (409), refetch SHA and retry once
-      if ((err.message || '').includes('409')) {
-        const freshSha = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
-        await doPut(freshSha);
-        toast('Saved to GitHub ✔  (Pages will update shortly)');
-        return;
-      }
-      throw err;
-    }
-  } catch (err) {
-    console.error(err);
-    toast('Save failed: ' + err.message, 4000);
-  }
 }
 
-// -------------------- Multipage: New/Open helpers --------------------
-async function loadPageFromRepo(path) {
-  const token = getTokenFromHash();
-  if (!token) { toast('Sign in first (Shift + A)'); return; }
-
-  const meta = await ghGetFileMeta(token, path);
-  if (!meta) { toast('Page not found: ' + path, 3000); return; }
+async function loadPage(path) {
+  if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
+  const meta = await ghGet(path);
+  if (!meta) { toast('Page not found: ' + path, 2500); return; }
 
   const content = decodeURIComponent(escape(atob(meta.content || '')));
-  const tmp = document.createElement('html');
-  tmp.innerHTML = content;
-
+  const tmp = document.createElement('html'); tmp.innerHTML = content;
   const bodyEl  = tmp.querySelector('body');
   const styleEl = tmp.querySelector('style');
 
   editor.setComponents(bodyEl ? bodyEl.innerHTML : content);
   editor.setStyle(styleEl ? styleEl.textContent : '');
+  CURRENT_PATH = path;
+  localStorage.setItem('gjs-current-path', CURRENT_PATH);
+  updatePagesBadge();
   toast('Loaded: ' + path);
 }
 
-async function savePageToRepo(path) {
-  const token = getTokenFromHash();
-  if (!token) { toast('Sign in first (Shift + A)'); return; }
+async function savePage(path = CURRENT_PATH) {
+  if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
+  const doc = buildDocFromEditor();
 
-  const html = editor.getHtml({ cleanId: true });
-  const css  = editor.getCss();
-
-  const doc = `<!doctype html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-<style>${css}</style>
-</head><body>
-${html}
-</body></html>`.trim();
-
-  const meta = await ghGetFileMeta(token, path);
-  const sha  = meta && meta.sha ? meta.sha : undefined;
-
-  await putFile({
-    token, owner: GH_OWNER, repo: GH_REPO, path,
-    content: doc,
-    message: `save: ${path} via editor`,
-    branch: GH_BRANCH,
-    sha
-  });
+  // fetch latest sha, try put, on 409 refetch sha once and retry
+  let sha = await getFileSha(path);
+  try {
+    await putFile({ path, content: doc, message: `save: ${path} via editor`, sha });
+  } catch (err) {
+    if ((err.message || '').includes('409')) {
+      sha = await getFileSha(path);
+      await putFile({ path, content: doc, message: `save: ${path} via editor (retry)`, sha });
+    } else {
+      throw err;
+    }
+  }
+  CURRENT_PATH = path;
+  localStorage.setItem('gjs-current-path', CURRENT_PATH);
+  updatePagesBadge();
   toast('Saved: ' + path);
 }
 
-// -------------------- Keyboard shortcuts --------------------
+async function saveAsDialog() {
+  const slug = prompt('Save As — page slug (e.g. about):');
+  if (!slug) return;
+  await savePage(`pages/${slug}.html`);
+}
+
+/* ---------------- Pages Manager UI ---------------- */
+function updatePagesBadge() {
+  let el = document.getElementById('pages-badge');
+  if (!el) return;
+  el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}`;
+}
+
+function showPagesModal(items) {
+  const listHtml = items.map(it => `
+    <li style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 0;border-bottom:1px solid #222">
+      <span style="font-family:system-ui;color:#eee">${it.path}</span>
+      <span>
+        <button data-open="${it.path}" class="gjs-btn-prim">Open</button>
+        <button data-dup="${it.path}" class="gjs-btn">Duplicate</button>
+      </span>
+    </li>
+  `).join('') || '<li style="color:#999">No pages yet</li>';
+
+  const html = `
+    <div style="font-family:system-ui;color:#eee">
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
+        <strong>Pages</strong>
+        <span id="pages-badge" style="font-size:12px;color:#9ae6b4;background:#234;padding:4px 8px;border-radius:8px"></span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button id="pg-new" class="gjs-btn-prim">New</button>
+        <button id="pg-save" class="gjs-btn-prim">Save</button>
+        <button id="pg-saveas" class="gjs-btn">Save As…</button>
+        <button id="pg-reload" class="gjs-btn">Reload List</button>
+      </div>
+      <ul style="list-style:none;padding:0;margin:0;max-height:50vh;overflow:auto">${listHtml}</ul>
+    </div>
+  `;
+
+  const modal = editor.Modal;
+  modal.open({ title: 'Pages Manager', content: html });
+  updatePagesBadge();
+
+  const root = modal.getContentEl();
+
+  root.querySelector('#pg-new')?.addEventListener('click', async () => {
+    const slug = prompt('New page slug (e.g. work):');
+    if (!slug) return;
+    editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
+    editor.setStyle('');
+    await savePage(`pages/${slug}.html`);
+    toast('Created: pages/' + slug + '.html');
+  });
+
+  root.querySelector('#pg-save')?.addEventListener('click', async () => {
+    await savePage();
+  });
+
+  root.querySelector('#pg-saveas')?.addEventListener('click', saveAsDialog);
+
+  root.querySelector('#pg-reload')?.addEventListener('click', async () => {
+    const again = await listPages();
+    showPagesModal(again);
+  });
+
+  root.querySelectorAll('button[data-open]')?.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await loadPage(btn.getAttribute('data-open'));
+      const again = await listPages();
+      showPagesModal(again);
+    });
+  });
+
+  root.querySelectorAll('button[data-dup]')?.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const src = btn.getAttribute('data-dup');
+      const target = prompt(`Duplicate "${src}" to (e.g. pages/copy.html):`, src.replace('.html', '-copy.html'));
+      if (!target) return;
+      // load src, then save to target
+      const meta = await ghGet(src);
+      const content = decodeURIComponent(escape(atob(meta.content || '')));
+      const tmp = document.createElement('html'); tmp.innerHTML = content;
+      const bodyEl  = tmp.querySelector('body');
+      const styleEl = tmp.querySelector('style');
+      editor.setComponents(bodyEl ? bodyEl.innerHTML : content);
+      editor.setStyle(styleEl ? styleEl.textContent : '');
+      await savePage(target);
+      const again = await listPages();
+      showPagesModal(again);
+      toast('Duplicated to: ' + target);
+    });
+  });
+}
+
+/* Add “Pages” button in the top bar */
+const panels = editor.Panels;
+panels.addButton('options', {
+  id: 'open-pages',
+  className: 'fa fa-files-o',
+  attributes: { title: 'Pages Manager' },
+  command: async () => {
+    if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
+    const items = await listPages();
+    showPagesModal(items);
+  }
+});
+
+/* ---------------- Keyboard shortcuts ---------------- */
 document.addEventListener('keydown', (e) => {
-  // Shift + A → Sign in (OAuth via Cloudflare Worker)
+  // Shift + A — Sign in
   if (e.shiftKey && e.key.toLowerCase() === 'a') {
     e.preventDefault();
     toast('Redirecting to GitHub sign-in…');
     window.location.href = `${WORKER_URL}/login`;
   }
-  // Shift + S → Save to GitHub (index.html)
+  // Shift + S — Save current page
   if (e.shiftKey && e.key.toLowerCase() === 's') {
     e.preventDefault();
-    saveToGitHub();
+    savePage();
   }
-  // Shift + N → New page (save as pages/<slug>.html)
+  // Shift + N — New page
   if (e.shiftKey && e.key.toLowerCase() === 'n') {
     e.preventDefault();
     const slug = prompt('New page slug (e.g. about):');
     if (!slug) return;
-    const path = `pages/${slug}.html`;
     editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
     editor.setStyle('');
-    savePageToRepo(path);
+    savePage(`pages/${slug}.html`);
   }
-  // Shift + O → Open page (pages/<slug>.html)
+  // Shift + O — Open page
   if (e.shiftKey && e.key.toLowerCase() === 'o') {
     e.preventDefault();
-    const slug = prompt('Open page slug (e.g. about):');
-    if (!slug) return;
-    const path = `pages/${slug}.html`;
-    loadPageFromRepo(path);
+    (async () => {
+      if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
+      const items = await listPages();
+      showPagesModal(items);
+    })();
+  }
+  // Shift + P — Save As
+  if (e.shiftKey && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    saveAsDialog();
   }
 });
 
-// -------------------- Optional: wire a visible Save button if present --------------------
-const saveBtn = document.getElementById('gh-save');
-function syncSaveBtn() { if (saveBtn) saveBtn.disabled = !isAuthed(); }
+/* On load */
 document.addEventListener('DOMContentLoaded', () => {
-  syncSaveBtn();
-  if (isAuthed()) toast('Signed in to GitHub ✓  (Shift + S to save)');
+  if (isAuthed()) toast(`Signed in ✓  Editing: ${CURRENT_PATH}`);
 });
-if (saveBtn) saveBtn.addEventListener('click', saveToGitHub);
