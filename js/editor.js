@@ -1,11 +1,18 @@
 /* =========================================================================
-   858 Builder — editor.js (full replacement)
+   858 Builder — editor.js
    - GrapesJS init
-   - <model-viewer> available in canvas
+   - <model-viewer> inside canvas
    - Export HTML button
-   - GitHub OAuth (Shift + A) via Cloudflare Worker
+   - OAuth login (Shift + A) via Cloudflare Worker
    - Save to GitHub (Shift + S) -> writes index.html
    ======================================================================= */
+
+// --------- CONFIG: EDIT HERE IF NEEDED ----------
+const WORKER_URL = 'https://858-builder.faroukalaofa.workers.dev';
+const GH_OWNER   = 'farouk858';
+const GH_REPO    = 'farouk858-site';  // <- change if your repo name differs
+const GH_BRANCH  = 'main';            // <- change if your default branch differs
+// ------------------------------------------------
 
 // -------------------- GrapesJS INIT --------------------
 const editor = grapesjs.init({
@@ -13,7 +20,6 @@ const editor = grapesjs.init({
   height: '100vh',
   fromElement: false,
   storageManager: {
-    // Start simple: store locally; we push to GitHub with Shift+S
     type: 'local',
     autosave: true,
     autoload: true,
@@ -21,17 +27,15 @@ const editor = grapesjs.init({
   },
   canvas: {
     scripts: [
-      // Make <model-viewer> available inside the editor canvas
       'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'
     ]
   },
-  // If you loaded a custom plugin file that registers window.modelViewerPlugin,
-  // enable it by uncommenting the next 2 lines:
+  // If you have a custom plugin that registers window.modelViewerPlugin:
   // plugins: [window.modelViewerPlugin],
   // pluginsOpts: {},
 });
 
-// Starter content (only if canvas is empty)
+// Starter content (only if empty)
 if (!editor.getComponents().length) {
   editor.setComponents(`
     <section style="padding:40px; color:white; background:#000">
@@ -147,11 +151,6 @@ async function saveToGitHub() {
   const token = getTokenFromHash();
   if (!token) { toast('Not signed in. Press Shift + A to sign in.'); return; }
 
-  // Repo details (update if you rename things)
-  const owner  = 'farouk858';
-  const repo   = 'farouk858-site';
-  const branch = 'main';
-
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
 
@@ -168,12 +167,12 @@ ${html}
 
   try {
     const path = 'index.html';
-    const sha  = await getFileSha({ token, owner, repo, path, branch });
+    const sha  = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
     await putFile({
-      token, owner, repo, path,
+      token, owner: GH_OWNER, repo: GH_REPO, path,
       content: page,
       message: 'chore: save from visual editor',
-      branch,
+      branch: GH_BRANCH,
       sha
     });
     toast('Saved to GitHub ✔  (Pages will update shortly)');
@@ -189,8 +188,7 @@ document.addEventListener('keydown', (e) => {
   if (e.shiftKey && e.key.toLowerCase() === 'a') {
     e.preventDefault();
     toast('Redirecting to GitHub sign-in…');
-    // Your Worker domain from your OAuth step:
-    window.location.href = 'https://farouk858.workers.dev/login';
+    window.location.href = `${WORKER_URL}/login`;
   }
   // Shift + S → Save to GitHub
   if (e.shiftKey && e.key.toLowerCase() === 's') {
@@ -199,7 +197,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// -------------------- Optional: wire a visible Save button if present --------------------
+// Optional: enable a visible Save button if present
 const saveBtn = document.getElementById('gh-save');
 function syncSaveBtn() { if (saveBtn) saveBtn.disabled = !isAuthed(); }
 document.addEventListener('DOMContentLoaded', () => {
