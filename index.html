@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>farouk858 — portfolio</title>
+  <!-- Load model-viewer for the live site too -->
+  <script type="module"
+    src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <style>
+    html,body {margin:0;height:100%;background:#000;color:#fff;font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header {position:fixed;top:0;left:0;right:0;padding:12px 16px;background:linear-gradient(#0008,#0000);}
+    main {padding-top:56px}
+    a {color:#7ee787}
+    .grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px;padding:24px}
+    model-viewer {width:100%;height:420px;background:transparent}
+  </style>
+</head>
+<body>
+  <header>
+    <strong>farouk858.com</strong> · <a href="editor.html">Open Editor</a>
+  </header>
+
+  <main>
+    <div class="grid">
+      <!-- Example showcase block; replace with content exported from editor later -->
+      <model-viewer src="models/sample.glb" alt="Sample"
+        camera-controls disable-zoom auto-rotate
+        exposure="1.1" shadow-intensity="1" environment-image="neutral"></model-viewer>
+      <div>
+        <h2>Welcome</h2>
+        <p>Edit this site visually at <a href="editor.html">the Editor</a>, then commit changes.</p>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
