@@ -1,10 +1,11 @@
 /* =========================================================================
    858 Builder — editor.js (full)
-   - GrapesJS init
-   - <model-viewer> inside canvas
+   - GrapesJS init (+ <model-viewer> inside canvas)
+   - 3D Model plugin enabled
    - Export HTML button
    - OAuth login (Shift + A) via Cloudflare Worker
    - Save to GitHub (Shift + S) -> writes index.html (with 409 retry)
+   - Simple multipage: Shift + N (new), Shift + O (open)
    ======================================================================= */
 
 /* ---------- CONFIG: EDIT IF NEEDED ---------- */
@@ -27,12 +28,13 @@ const editor = grapesjs.init({
   },
   canvas: {
     scripts: [
+      // Make <model-viewer> available inside the editor canvas
       'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'
     ]
   },
-  // If you use a custom plugin that registers window.modelViewerPlugin:
-  // plugins: [window.modelViewerPlugin],
-  // pluginsOpts: {},
+  // Enable your 3D Model block plugin (provided by js/model-plugin.js)
+  plugins: [window.modelViewerPlugin],
+  pluginsOpts: {},
 });
 
 // Starter content (only if empty)
@@ -41,7 +43,7 @@ if (!editor.getComponents().length) {
     <section style="padding:40px; color:white; background:#000">
       <h1 style="font-family:system-ui;margin:0 0 16px;">farouk858 — new portfolio</h1>
       <p style="font-family:system-ui;opacity:.8;margin:0 0 24px;">
-        Press <strong>Shift + A</strong> to sign in · <strong>Shift + S</strong> to save to GitHub.
+        <strong>Shortcuts:</strong> Shift + A (Sign in) · Shift + S (Save) · Shift + N (New page) · Shift + O (Open page)
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
         <model-viewer src="models/sample.glb" alt="Sample"
@@ -56,6 +58,13 @@ if (!editor.getComponents().length) {
     </section>
   `);
 }
+
+// Add a simple “Page Link” block
+editor.BlockManager.add('page-link', {
+  label: 'Page Link',
+  category: 'Navigation',
+  content: `<a href="/pages/about.html" style="color:#7ee787;font-family:system-ui;text-decoration:none">Go to About →</a>`
+});
 
 // -------------------- Tiny toast --------------------
 function toast(msg, ms = 1800) {
@@ -116,8 +125,9 @@ function isAuthed() { return !!getTokenFromHash(); }
 
 // -------------------- GitHub API helpers --------------------
 async function getFileSha({ token, owner, repo, path, branch = 'main' }) {
+  // cache-bust with Date.now to avoid any proxy cache on GET
   const r = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}`,
+    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}&_=${Date.now()}`,
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
   );
   if (r.status === 404) return null; // new file
@@ -147,6 +157,17 @@ async function putFile({ token, owner, repo, path, content, message, branch = 'm
     const txt = await r.text();
     throw new Error(`PUT failed ${r.status}: ${txt}`);
   }
+  return r.json();
+}
+
+// Convenience GET to download a file (used by multipage loader)
+async function ghGetFileMeta(token, path) {
+  const r = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+  );
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('GET failed ' + r.status);
   return r.json();
 }
 
@@ -204,6 +225,56 @@ ${html}
   }
 }
 
+// -------------------- Multipage: New/Open helpers --------------------
+async function loadPageFromRepo(path) {
+  const token = getTokenFromHash();
+  if (!token) { toast('Sign in first (Shift + A)'); return; }
+
+  const meta = await ghGetFileMeta(token, path);
+  if (!meta) { toast('Page not found: ' + path, 3000); return; }
+
+  const content = decodeURIComponent(escape(atob(meta.content || '')));
+  const tmp = document.createElement('html');
+  tmp.innerHTML = content;
+
+  const bodyEl  = tmp.querySelector('body');
+  const styleEl = tmp.querySelector('style');
+
+  editor.setComponents(bodyEl ? bodyEl.innerHTML : content);
+  editor.setStyle(styleEl ? styleEl.textContent : '');
+  toast('Loaded: ' + path);
+}
+
+async function savePageToRepo(path) {
+  const token = getTokenFromHash();
+  if (!token) { toast('Sign in first (Shift + A)'); return; }
+
+  const html = editor.getHtml({ cleanId: true });
+  const css  = editor.getCss();
+
+  const doc = `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+<style>${css}</style>
+</head><body>
+${html}
+</body></html>`.trim();
+
+  const meta = await ghGetFileMeta(token, path);
+  const sha  = meta && meta.sha ? meta.sha : undefined;
+
+  await putFile({
+    token, owner: GH_OWNER, repo: GH_REPO, path,
+    content: doc,
+    message: `save: ${path} via editor`,
+    branch: GH_BRANCH,
+    sha
+  });
+  toast('Saved: ' + path);
+}
+
 // -------------------- Keyboard shortcuts --------------------
 document.addEventListener('keydown', (e) => {
   // Shift + A → Sign in (OAuth via Cloudflare Worker)
@@ -212,10 +283,28 @@ document.addEventListener('keydown', (e) => {
     toast('Redirecting to GitHub sign-in…');
     window.location.href = `${WORKER_URL}/login`;
   }
-  // Shift + S → Save to GitHub
+  // Shift + S → Save to GitHub (index.html)
   if (e.shiftKey && e.key.toLowerCase() === 's') {
     e.preventDefault();
     saveToGitHub();
+  }
+  // Shift + N → New page (save as pages/<slug>.html)
+  if (e.shiftKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    const slug = prompt('New page slug (e.g. about):');
+    if (!slug) return;
+    const path = `pages/${slug}.html`;
+    editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
+    editor.setStyle('');
+    savePageToRepo(path);
+  }
+  // Shift + O → Open page (pages/<slug>.html)
+  if (e.shiftKey && e.key.toLowerCase() === 'o') {
+    e.preventDefault();
+    const slug = prompt('Open page slug (e.g. about):');
+    if (!slug) return;
+    const path = `pages/${slug}.html`;
+    loadPageFromRepo(path);
   }
 });
 
