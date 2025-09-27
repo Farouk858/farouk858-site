@@ -1,10 +1,9 @@
-// Simple <model-viewer> block + traits for GrapesJS
+// js/model-plugin.js — adds a <model-viewer> block and component traits
 (function () {
   function plugin(editor) {
     const bm = editor.BlockManager;
     const dc = editor.DomComponents;
 
-    // Block to drag/drop
     bm.add('block-3d-model', {
       label: '3D Model',
       category: '3D',
@@ -12,7 +11,7 @@
         <model-viewer
           src="models/sample.glb"
           alt="3D object"
-          style="width:100%;height:400px;background:transparent"
+          style="width:100%;height:420px;background:transparent"
           camera-controls
           disable-zoom
           auto-rotate
@@ -23,9 +22,8 @@
       `
     });
 
-    // Component type for <model-viewer>
     dc.addType('model-viewer', {
-      isComponent: el => el.tagName === 'MODEL-VIEWER',
+      isComponent: el => el.tagName && el.tagName.toLowerCase() === 'model-viewer',
       model: {
         defaults: {
           tagName: 'model-viewer',
@@ -35,18 +33,15 @@
             { type: 'checkbox', name: 'camera-controls', label: 'Orbit Controls' },
             { type: 'checkbox', name: 'disable-zoom', label: 'Disable Zoom' },
             { type: 'checkbox', name: 'auto-rotate', label: 'Auto Rotate' },
-            { type: 'number', name: 'exposure', label: 'Exposure', min:0, max:2, step:0.1 },
-            { type: 'number', name: 'shadow-intensity', label: 'Shadow', min:0, max:2, step:0.1 },
-            { type: 'text', name: 'environment-image', label: 'Environment', placeholder: 'neutral | studio | URL' },
             { type: 'text', name: 'rotation-per-second', label: 'Rotate Speed (e.g. 60deg)' },
+            { type: 'number', name: 'exposure', label: 'Exposure', min: 0, max: 3, step: 0.1 },
+            { type: 'number', name: 'shadow-intensity', label: 'Shadow', min: 0, max: 2, step: 0.1 },
+            { type: 'text', name: 'environment-image', label: 'Environment (neutral/studio/URL)' },
           ],
-          // Basic styles for resizing in canvas
-          styles: { width: '100%', height: '400px' }
+          styles: { width: '100%', height: '420px' }
         }
       }
     });
   }
-
-  if (typeof window !== 'undefined') window.modelViewerPlugin = plugin;
+  window.modelViewerPlugin = plugin;
 })();
-
