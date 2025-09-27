@@ -1,18 +1,18 @@
 /* =========================================================================
-   858 Builder — editor.js
+   858 Builder — editor.js (full)
    - GrapesJS init
    - <model-viewer> inside canvas
    - Export HTML button
    - OAuth login (Shift + A) via Cloudflare Worker
-   - Save to GitHub (Shift + S) -> writes index.html
+   - Save to GitHub (Shift + S) -> writes index.html (with 409 retry)
    ======================================================================= */
 
-// --------- CONFIG: EDIT HERE IF NEEDED ----------
+/* ---------- CONFIG: EDIT IF NEEDED ---------- */
 const WORKER_URL = 'https://858-builder.faroukalaofa.workers.dev';
 const GH_OWNER   = 'farouk858';
-const GH_REPO    = 'farouk858-site';  // <- change if your repo name differs
-const GH_BRANCH  = 'main';            // <- change if your default branch differs
-// ------------------------------------------------
+const GH_REPO    = 'farouk858-site';
+const GH_BRANCH  = 'main';
+/* ------------------------------------------- */
 
 // -------------------- GrapesJS INIT --------------------
 const editor = grapesjs.init({
@@ -30,7 +30,7 @@ const editor = grapesjs.init({
       'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'
     ]
   },
-  // If you have a custom plugin that registers window.modelViewerPlugin:
+  // If you use a custom plugin that registers window.modelViewerPlugin:
   // plugins: [window.modelViewerPlugin],
   // pluginsOpts: {},
 });
@@ -115,18 +115,18 @@ function getTokenFromHash() {
 function isAuthed() { return !!getTokenFromHash(); }
 
 // -------------------- GitHub API helpers --------------------
-async function getFileSha({ token, owner, repo, path, branch='main' }) {
+async function getFileSha({ token, owner, repo, path, branch = 'main' }) {
   const r = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}`,
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
   );
-  if (r.status === 404) return null;
+  if (r.status === 404) return null; // new file
   if (!r.ok) throw new Error('Failed to load file: ' + r.status);
   const j = await r.json();
   return j.sha || null;
 }
 
-async function putFile({ token, owner, repo, path, content, message, branch='main', sha=null }) {
+async function putFile({ token, owner, repo, path, content, message, branch = 'main', sha = null }) {
   const body = {
     message,
     branch,
@@ -142,11 +142,15 @@ async function putFile({ token, owner, repo, path, content, message, branch='mai
       body: JSON.stringify(body)
     }
   );
-  if (!r.ok) throw new Error(`PUT failed ${r.status}: ${await r.text()}`);
+
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`PUT failed ${r.status}: ${txt}`);
+  }
   return r.json();
 }
 
-// -------------------- Save to GitHub --------------------
+// -------------------- Save to GitHub (with 409 retry) --------------------
 async function saveToGitHub() {
   const token = getTokenFromHash();
   if (!token) { toast('Not signed in. Press Shift + A to sign in.'); return; }
@@ -165,17 +169,35 @@ async function saveToGitHub() {
 ${html}
 </body></html>`.trim();
 
+  const path = 'index.html';
+
+  const doPut = (sha) => putFile({
+    token, owner: GH_OWNER, repo: GH_REPO, path,
+    content: page,
+    message: 'chore: save from visual editor',
+    branch: GH_BRANCH,
+    sha: sha || undefined
+  });
+
   try {
-    const path = 'index.html';
-    const sha  = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
-    await putFile({
-      token, owner: GH_OWNER, repo: GH_REPO, path,
-      content: page,
-      message: 'chore: save from visual editor',
-      branch: GH_BRANCH,
-      sha
-    });
-    toast('Saved to GitHub ✔  (Pages will update shortly)');
+    // 1) Fetch latest SHA (null if file doesn't exist)
+    let sha = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
+
+    // 2) Attempt save
+    try {
+      await doPut(sha);
+      toast('Saved to GitHub ✔  (Pages will update shortly)');
+      return;
+    } catch (err) {
+      // 3) If conflict (409), refetch SHA and retry once
+      if ((err.message || '').includes('409')) {
+        const freshSha = await getFileSha({ token, owner: GH_OWNER, repo: GH_REPO, path, branch: GH_BRANCH });
+        await doPut(freshSha);
+        toast('Saved to GitHub ✔  (Pages will update shortly)');
+        return;
+      }
+      throw err;
+    }
   } catch (err) {
     console.error(err);
     toast('Save failed: ' + err.message, 4000);
@@ -197,7 +219,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Optional: enable a visible Save button if present
+// -------------------- Optional: wire a visible Save button if present --------------------
 const saveBtn = document.getElementById('gh-save');
 function syncSaveBtn() { if (saveBtn) saveBtn.disabled = !isAuthed(); }
 document.addEventListener('DOMContentLoaded', () => {
