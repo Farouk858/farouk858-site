@@ -13,7 +13,7 @@ const GH_BRANCH  = 'main';
 const ENABLE_BLOCKS_BASIC  = true; // grapesjsBlocksBasic
 const ENABLE_FORMS         = true; // grapesjsPluginForms
 const ENABLE_NAVBAR        = true; // grapesjsNavbar
-const ENABLE_TABS          = false; // grapesjsTabs
+const ENABLE_TABS          = true; // grapesjsTabs
 const ENABLE_CUSTOM_CODE   = false; // grapesjsCustomCode
 /* -------------------------------------------------------------------- */
 
