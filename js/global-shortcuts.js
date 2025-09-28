@@ -1,10 +1,9 @@
 // js/global-shortcuts.js
-// Global keyboard shortcuts for ALL site pages
+// On any public page, Shift + A → Sign-in page (not the editor directly)
 
 document.addEventListener('keydown', (e) => {
   if (e.shiftKey && (e.key || '').toLowerCase() === 'a') {
     e.preventDefault();
-    // Always send to your editor page
-    window.location.href = '/farouk858-site/editor.html';
+    window.location.href = '/farouk858-site/signin.html';
   }
 });
