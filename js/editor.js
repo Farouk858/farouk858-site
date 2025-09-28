@@ -6,9 +6,12 @@ const GH_OWNER  = 'farouk858';
 const GH_REPO   = 'farouk858-site';
 const GH_BRANCH = 'main';
 
+// Allowed editors (case-insensitive)
+const ALLOW_LIST = ['farouk858'];
+
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
-/* --- NEW: capture token if Worker ever returns to editor.html --- */
+/* --- Capture token if Worker ever returns to editor.html --- */
 (function captureTokenFromHash() {
   const m = location.hash && location.hash.match(/access_token=([^&]+)/);
   if (m) {
@@ -44,14 +47,22 @@ async function verifyOrRedirect() {
   const t = token();
   if (!t) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
 
-  // Verify user & repo access
+  // Verify user
   const u = await fetch('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
   if (!u.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
   const user = await u.json();
-  if (user.login !== GH_OWNER) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-denied'); }
 
+  // ✅ Case-insensitive allow-list check
+  const loginLower = (user.login || '').toLowerCase();
+  const allowed = ALLOW_LIST.map(s => s.toLowerCase());
+  if (!allowed.includes(loginLower)) {
+    window.location.replace('/farouk858-site/signin.html');
+    throw new Error('user-denied');
+  }
+
+  // Repo + permission
   const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`, {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
@@ -266,7 +277,6 @@ function showPagesModal(editor, items) {
     `);
   }
 
-  // Top bar
   const panels = editor.Panels;
   panels.addButton('options', {
     id: 'open-pages', label: 'Pages', className: 'gjs-pn-btn',
@@ -274,7 +284,6 @@ function showPagesModal(editor, items) {
     command: async () => { const items = await listPages(); showPagesModal(editor, items); }
   });
 
-  // Shortcuts
   document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(editor); }
     if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); (async () => { const items = await listPages(); showPagesModal(editor, items); })(); }
