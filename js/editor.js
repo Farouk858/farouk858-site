@@ -1,6 +1,8 @@
 /* =========================================================================
    858 Builder — editor.js
-   Adds right-side Assets Dock + working uploads + dblclick pickers + library
+   - Reliable Save/Pages
+   - Right-side Assets dock + modal fallback
+   - Global double-click picker for IMG / VIDEO / MODEL-VIEWER
    ======================================================================= */
 
 const GH_OWNER  = 'farouk858';
@@ -28,7 +30,7 @@ function toast(msg, ms = 2600) {
     el = document.createElement('div');
     el.id = 'gh-toast';
     el.style.cssText = `
-      position:fixed; right:16px; bottom:16px; z-index:99999;
+      position:fixed; right:16px; bottom:16px; z-index:2147483647;
       background:rgba(0,0,0,.92); color:#fff; padding:10px 14px;
       border-radius:10px; font:13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
       box-shadow:0 6px 20px rgba(0,0,0,.35); transition:opacity .2s; max-width:60ch;`;
@@ -245,16 +247,19 @@ function showPagesModal(editor, items) {
   });
 }
 
-/* ---------- right-side Assets Dock ---------- */
+/* ---------- Assets Dock (fixed, high z-index) ---------- */
 function mountAssetsDock(editor) {
+  // Create only once
+  if (document.getElementById('am-dock')) return;
+
   const dock = document.createElement('div');
   dock.id = 'am-dock';
   dock.innerHTML = `
     <style>
       #am-dock{
-        position:fixed; top:64px; right:8px; bottom:8px; width:320px; z-index:9999;
-        background:rgba(12,12,12,.95); border:1px solid #222; border-radius:12px;
-        box-shadow:0 12px 40px rgba(0,0,0,.45); display:flex; flex-direction:column; overflow:hidden;
+        position:fixed; top:64px; right:8px; bottom:8px; width:320px; z-index:2147483647;
+        background:rgba(12,12,12,.97); border:1px solid #222; border-radius:12px;
+        box-shadow:0 12px 40px rgba(0,0,0,.55); display:flex; flex-direction:column; overflow:hidden;
       }
       #am-head{ padding:10px 12px; display:flex; gap:8px; align-items:center; border-bottom:1px solid #222; }
       #am-head strong{ color:#eee; font:600 13px system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
@@ -263,10 +268,12 @@ function mountAssetsDock(editor) {
       #am-actions{ margin-left:auto; display:flex; gap:8px; }
       .am-btn{ padding:6px 10px; border-radius:8px; background:#1f6feb; color:#fff; border:0; cursor:pointer; font:600 12px system-ui; }
       .am-btn.secondary{ background:#333; color:#ddd; }
+      .am-btn.ghost{ background:transparent; color:#aaa; border:1px solid #333; }
     </style>
     <div id="am-head">
       <strong>Assets</strong>
       <div id="am-actions">
+        <button id="am-toggle" class="am-btn ghost">Hide</button>
         <button id="am-pick" class="am-btn">Upload</button>
         <button id="am-open" class="am-btn secondary">Library</button>
       </div>
@@ -297,7 +304,7 @@ function mountAssetsDock(editor) {
     fileInput.value = '';
   });
 
-  // Make the dock a drop zone
+  // Dock drop zone
   dock.addEventListener('dragover', e => { e.preventDefault(); });
   dock.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -310,15 +317,24 @@ function mountAssetsDock(editor) {
     if (added.length) am.add(added);
   });
 
-  // Also expose a generic picker API for dbl-click handlers
+  // Toggle visibility
+  dock.querySelector('#am-toggle').addEventListener('click', () => {
+    if (dock.style.display === 'none') {
+      dock.style.display = 'flex';
+      dock.querySelector('#am-toggle').textContent = 'Hide';
+    } else {
+      dock.style.display = 'none';
+    }
+  });
+
+  // Define picker API (also used by dbl-click)
   window._858_pickAsset = (cb) => {
-    // Clicking “Library” focuses the AM; picking an item returns URL
     am.open({});
     const sel = (m) => {
       const src = m && m.get && m.get('src');
       if (src) cb(src);
       am.off('select', sel);
-      // do not close; it lives in the dock
+      // keep dock open
     };
     am.on('select', sel);
   };
@@ -334,7 +350,7 @@ function mountAssetsDock(editor) {
     fromElement: false,
 
     assetManager: {
-      upload: false,            // we handle uploads via the dock
+      upload: false,            // handled by our dock
       embedAsBase64: false,
       autoAdd: true,
     },
@@ -355,7 +371,7 @@ function mountAssetsDock(editor) {
   editor.on('change', () => { DIRTY = true; updatePagesBadge(); });
   window.addEventListener('beforeunload', (e) => { if (!DIRTY) return; e.preventDefault(); e.returnValue = ''; });
 
-  // Starter content if blank
+  // Starter
   if (!editor.getComponents().length) {
     editor.setComponents(`
       <section style="padding:40px 6vw; color:#fff; background:#000">
@@ -371,7 +387,7 @@ function mountAssetsDock(editor) {
     `);
   }
 
-  // Top bar buttons
+  // Top bar buttons (Assets restored)
   const panels = editor.Panels;
   panels.addButton('options', {
     id: 'save-now', label: 'Save', className: 'gjs-pn-btn',
@@ -385,6 +401,11 @@ function mountAssetsDock(editor) {
   panels.addButton('options', {
     id: 'open-blocks', label: 'Blocks', className: 'gjs-pn-btn',
     attributes: { title: 'Toggle Blocks' }, command: () => editor.Blocks.open()
+  });
+  panels.addButton('options', {
+    id: 'open-assets-modal', label: 'Assets', className: 'gjs-pn-btn',
+    attributes: { title: 'Open Assets (modal)' },
+    command: () => editor.AssetManager.open({})
   });
 
   // Keymaps
@@ -405,11 +426,51 @@ function mountAssetsDock(editor) {
     }
   });
 
+  // GLOBAL dbl-click picker → works for IMG / VIDEO / MODEL-VIEWER
+  // (uses _858_pickAsset; falls back to AM modal)
+  function ensurePicker(editor) {
+    if (!window._858_pickAsset) {
+      window._858_pickAsset = (cb) => {
+        const am = editor.AssetManager;
+        am.open({});
+        const sel = (m) => {
+          const src = m && m.get && m.get('src');
+          if (src) cb(src);
+          am.off('select', sel);
+        };
+        am.on('select', sel);
+      };
+    }
+  }
+  ensurePicker(editor);
+
+  editor.on('component:dblclick', (cmp) => {
+    const el = cmp.getEl?.() || cmp.view?.el;
+    if (!el) return;
+    const tag = (el.tagName || '').toUpperCase();
+    if (tag === 'IMG') {
+      window._858_pickAsset?.((url) => cmp.addAttributes({ src: url }));
+    } else if (tag === 'VIDEO') {
+      window._858_pickAsset?.((url) => {
+        cmp.addAttributes({ src: url });
+        // update <source> if present
+        const source = el.querySelector('source');
+        if (source) { source.src = url; el.load?.(); }
+      });
+    } else if (tag === 'MODEL-VIEWER') {
+      window._858_pickAsset?.((url) => cmp.addAttributes({ src: url }));
+    }
+  });
+
   editor.on('load', () => {
     editor.Blocks.open();
     editor.BlockManager.getCategories().forEach(cat => cat.set('open', true));
     updatePagesBadge();
     toast('Authorized ✓  Editor loaded');
-    mountAssetsDock(editor); // ← right-side Assets panel
+
+    // Mount dock (super-high z-index so it’s always visible)
+    mountAssetsDock(editor);
+
+    // If the dock is hidden or fails, Assets button still opens modal
   });
 })();
