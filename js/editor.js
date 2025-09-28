@@ -1,5 +1,5 @@
 /* =========================================================================
-   858 Builder — editor.js (defensive plugins + pages + save)
+   858 Builder — editor.js (minimal boot + feature flags)
    ======================================================================= */
 
 /* ---------- CONFIG ---------- */
@@ -9,22 +9,30 @@ const GH_REPO    = 'farouk858-site';
 const GH_BRANCH  = 'main';
 /* --------------------------- */
 
+/* ---------- FEATURE FLAGS (turn on one-by-one once stable) ---------- */
+const ENABLE_BLOCKS_BASIC  = false; // grapesjsBlocksBasic
+const ENABLE_FORMS         = false; // grapesjsPluginForms
+const ENABLE_NAVBAR        = false; // grapesjsNavbar
+const ENABLE_TABS          = false; // grapesjsTabs
+const ENABLE_CUSTOM_CODE   = false; // grapesjsCustomCode
+/* -------------------------------------------------------------------- */
+
 // Track which file you’re editing right now
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
 /* ---------------- Collect plugins safely ---------------- */
 const pluginFns = [];
 
-// Official/CDN plugins expose these UMD globals:
-if (window.grapesjsBlocksBasic)  pluginFns.push(window.grapesjsBlocksBasic);
-if (window.grapesjsPluginForms)  pluginFns.push(window.grapesjsPluginForms);
-if (window.grapesjsNavbar)       pluginFns.push(window.grapesjsNavbar);
-if (window.grapesjsTabs)         pluginFns.push(window.grapesjsTabs);
-if (window.grapesjsCustomCode)   pluginFns.push(window.grapesjsCustomCode);
+// Your custom plugins (local files)
+if (window.modelViewerPlugin) pluginFns.push(window.modelViewerPlugin);
+if (window.blocksPlugin)      pluginFns.push(window.blocksPlugin);
 
-// Your plugins:
-if (window.modelViewerPlugin)    pluginFns.push(window.modelViewerPlugin);
-if (window.blocksPlugin)         pluginFns.push(window.blocksPlugin);
+// External plugins (enable via flags only when globals exist)
+if (ENABLE_BLOCKS_BASIC  && window.grapesjsBlocksBasic)  pluginFns.push(window.grapesjsBlocksBasic);
+if (ENABLE_FORMS         && window.grapesjsPluginForms)  pluginFns.push(window.grapesjsPluginForms);
+if (ENABLE_NAVBAR        && window.grapesjsNavbar)       pluginFns.push(window.grapesjsNavbar);
+if (ENABLE_TABS          && window.grapesjsTabs)         pluginFns.push(window.grapesjsTabs);
+if (ENABLE_CUSTOM_CODE   && window.grapesjsCustomCode)   pluginFns.push(window.grapesjsCustomCode);
 
 /* ---------------- GrapesJS INIT ---------------- */
 const editor = grapesjs.init({
@@ -35,7 +43,7 @@ const editor = grapesjs.init({
   storageManager: { type: 'local', autosave: true, autoload: true, stepsBeforeSave: 1 },
 
   assetManager: {
-    upload: false,          // base64-embed for quick free hosting
+    upload: false,          // base64-embed
     embedAsBase64: true,
     autoAdd: true,
   },
@@ -49,15 +57,12 @@ const editor = grapesjs.init({
   },
 
   canvas: {
-    // Load model-viewer inside the canvas
+    // Make <model-viewer> available inside the canvas
     scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
   },
 
   plugins: pluginFns,
-  pluginsOpts: {
-    // Options only applied if the plugin is present:
-    [window.grapesjsBlocksBasic ? window.grapesjsBlocksBasic : '']: { flexGrid: true },
-  },
+  pluginsOpts: {},
 });
 
 /* Starter content (only once) */
@@ -305,11 +310,19 @@ document.addEventListener('keydown', (e) => {
     const slug = prompt('New page slug (e.g. about):'); if (!slug) return;
     editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`); editor.setStyle(''); savePage(`pages/${slug}.html`);
   }
-  if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); (async () => { if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; } const items = await listPages(); showPagesModal(items); })(); }
+  if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault();
+    (async () => { if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; } const items = await listPages(); showPagesModal(items); })();
+  }
   if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(); }
 });
 
 /* On load */
 document.addEventListener('DOMContentLoaded', () => {
+  // Simple boot check
+  try {
+    editor.on('load', () => console.log('[gjs] loaded'));
+  } catch (e) {
+    console.error('Editor failed to mount:', e);
+  }
   if (isAuthed()) toast(`Signed in ✓  Editing: ${CURRENT_PATH}`);
 });
