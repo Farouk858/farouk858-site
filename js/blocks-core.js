@@ -2,9 +2,7 @@
 // Core element palette for the 858 Builder
 
 (function () {
-  if (!window.grapesjs) return;
-
-  const plugin = (editor) => {
+  function registerPlugin(editor) {
     const bm = editor.BlockManager;
 
     // ---------- Section ----------
@@ -67,14 +65,14 @@
       `,
     });
 
-    // ---------- Image (supports png/jpg/webp/gif) ----------
+    // ---------- Image ----------
     bm.add('blk-image', {
       label: 'Image',
       category: 'Media',
       content: `<img src="https://picsum.photos/900/600" alt="Image" style="width:100%; height:auto; display:block" />`,
     });
 
-    // ---------- Video (HTML5) ----------
+    // ---------- Video ----------
     bm.add('blk-video', {
       label: 'Video',
       category: 'Media',
@@ -85,13 +83,14 @@
       `,
     });
 
-    // ---------- Embed (iframe) ----------
+    // ---------- Embed ----------
     bm.add('blk-embed', {
       label: 'Embed',
       category: 'Media',
       content: `
         <div style="position:relative; padding-top:56.25%; background:#000">
-          <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   style="position:absolute; inset:0; width:100%; height:100%; border:0"></iframe>
         </div>
       `,
@@ -111,7 +110,7 @@
       content: `<div style="height:48px"></div>`,
     });
 
-    // ---------- Page Link (visual nav item) ----------
+    // ---------- Page Link ----------
     bm.add('blk-page-link', {
       label: 'Page Link',
       category: 'Navigation',
@@ -123,7 +122,7 @@
       `,
     });
 
-    // ---------- 3D Model (model-viewer) ----------
+    // ---------- 3D Model ----------
     bm.add('blk-3d-model', {
       label: '3D Model',
       category: '3D',
@@ -135,15 +134,12 @@
       `,
     });
 
-    // Nice order in sidebar
+    // Open all categories by default
     bm.getCategories().forEach(cat => cat.set('open', true));
-  };
+  }
 
-  // Auto-register plugin when editor boots
-  if (!window._858_blocks_registered) {
-    window._858_blocks_registered = true;
-    grapesjs.plugins.add('blocks-core-858', plugin);
-    // If editor already exists, apply now; otherwise editor.js will init and pick it up.
-    if (window.editor) plugin(window.editor);
+  // Register as a grapesjs plugin
+  if (window.grapesjs) {
+    window.grapesjs.plugins.add('blocks-core-858', registerPlugin);
   }
 })();
