@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>858 Builder</title>
 
-  <!-- GrapesJS core CSS -->
+  <!-- GrapesJS core CSS (pinned working version) -->
   <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
   <style>
     html, body { height:100%; margin:0; background:#0b0b0b; }
@@ -16,24 +16,26 @@
 <body>
   <div id="gjs"></div>
 
-  <!-- Global auth helper (Shift+A anywhere) -->
+  <!-- (Optional) Global auth helper: Shift+A anywhere -->
   <script src="js/auth.js"></script>
 
-  <!-- GrapesJS core -->
+  <!-- Core GrapesJS FIRST -->
   <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
 
-  <!-- Optional plugins (UMD globals listed below) -->
-  <script src="https://unpkg.com/grapesjs-blocks-basic@1.0.2"></script>       <!-- global: grapesjsBlocksBasic -->
-  <script src="https://unpkg.com/grapesjs-plugin-forms@2.0.6"></script>       <!-- global: grapesjsPluginForms -->
-  <script src="https://unpkg.com/grapesjs-navbar@1.0.9"></script>             <!-- global: grapesjsNavbar -->
-  <script src="https://unpkg.com/grapesjs-tabs@1.0.6"></script>               <!-- global: grapesjsTabs -->
-  <script src="https://unpkg.com/grapesjs-custom-code@1.0.3"></script>        <!-- global: grapesjsCustomCode -->
-
-  <!-- Your custom plugins -->
+  <!-- Your custom plugins (no dependency on external bundles) -->
   <script src="js/model-plugin.js"></script>    <!-- exposes window.modelViewerPlugin -->
   <script src="js/blocks-plugin.js"></script>   <!-- exposes window.blocksPlugin -->
 
-  <!-- Main editor (defensive plugin loading) -->
+  <!-- Optional external plugins (commented out; enable later after it works) -->
+  <!--
+  <script src="https://unpkg.com/grapesjs-blocks-basic@1.0.2"></script>       <!~~ global: grapesjsBlocksBasic ~~>
+  <script src="https://unpkg.com/grapesjs-plugin-forms@2.0.6"></script>       <!~~ global: grapesjsPluginForms ~~>
+  <script src="https://unpkg.com/grapesjs-navbar@1.0.9"></script>             <!~~ global: grapesjsNavbar ~~>
+  <script src="https://unpkg.com/grapesjs-tabs@1.0.6"></script>               <!~~ global: grapesjsTabs ~~>
+  <script src="https://unpkg.com/grapesjs-custom-code@1.0.3"></script>        <!~~ global: grapesjsCustomCode ~~>
+  -->
+
+  <!-- Main editor (defensive; feature flags inside) -->
   <script src="js/editor.js"></script>
 </body>
 </html>
