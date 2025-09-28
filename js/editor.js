@@ -8,6 +8,16 @@ const GH_BRANCH = 'main';
 
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
+/* --- NEW: capture token if Worker ever returns to editor.html --- */
+(function captureTokenFromHash() {
+  const m = location.hash && location.hash.match(/access_token=([^&]+)/);
+  if (m) {
+    localStorage.setItem('gh_token', decodeURIComponent(m[1]));
+    history.replaceState({}, document.title, location.pathname + location.search);
+    console.log('[editor] captured token from hash');
+  }
+})();
+
 function toast(msg, ms = 2000) {
   let el = document.getElementById('gh-toast');
   if (!el) {
@@ -256,12 +266,10 @@ function showPagesModal(editor, items) {
     `);
   }
 
-  // Top bar buttons
+  // Top bar
   const panels = editor.Panels;
   panels.addButton('options', {
-    id: 'open-pages',
-    label: 'Pages',
-    className: 'gjs-pn-btn',
+    id: 'open-pages', label: 'Pages', className: 'gjs-pn-btn',
     attributes: { title: 'Pages Manager' },
     command: async () => { const items = await listPages(); showPagesModal(editor, items); }
   });
