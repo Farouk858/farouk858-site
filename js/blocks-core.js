@@ -4,7 +4,7 @@
     const bm = editor.BlockManager;
     const domc = editor.DomComponents;
 
-    // ---------------- Blocks ----------------
+    // -------- Blocks --------
     bm.add('blk-section', {
       label: 'Section', category: 'Layout',
       content: `
@@ -39,7 +39,6 @@
     bm.add('blk-image', { label: 'Image', category: 'Media',
       content: `<img src="https://picsum.photos/900/600" alt="Image" style="width:100%; height:auto; display:block" />` });
 
-    // Video block
     bm.add('blk-video', { label: 'Video', category: 'Media',
       content: `<video controls style="width:100%; display:block"><source src="" type="video/mp4"></video>` });
 
@@ -60,15 +59,13 @@
       content: `<a href="pages/about.html" style="display:inline-block; padding:10px 14px; border-radius:999px;
                 background:#222; color:#fff; text-decoration:none; border:1px solid #333; font-family:system-ui;">Go to About</a>` });
 
-    // 3D model block
     bm.add('blk-3d-model', { label: '3D Model', category: '3D',
       content: `<model-viewer src="" alt="3D"
                  camera-controls auto-rotate disable-zoom
                  exposure="1.2" shadow-intensity="1" environment-image="neutral"
                  style="width:100%; height:420px; background:transparent"></model-viewer>` });
 
-    // ---------------- Components with traits + file picker ----------------
-    // <video> component
+    // -------- Components (double-click to pick/upload) --------
     domc.addType('video', {
       isComponent: el => el.tagName === 'VIDEO',
       model: {
@@ -80,52 +77,49 @@
             { type: 'checkbox', name: 'muted' },
             { type: 'checkbox', name: 'controls', value: true },
           ],
-          script: function () { /* no-op */ }
         },
         init() {
-          this.on('dblclick', () => {
-            if (window._858_pickAsset) {
-              window._858_pickAsset((url) => {
-                this.addAttributes({ src: url });
-                // also set <source> if present
-                const srcEl = this.view.el.querySelector('source');
-                if (srcEl) srcEl.src = url;
-                this.view.el.load?.();
-              }, ['video/mp4','video/webm','video/quicktime','video/*']);
-            }
-          });
+          this.on('dblclick', () => window._858_pickAsset?.((url) => {
+            this.addAttributes({ src: url });
+            const s = this.view.el.querySelector('source'); if (s) { s.src = url; this.view.el.load?.(); }
+          }, ['video/*']));
         }
       }
     });
 
-    // <model-viewer> component
     domc.addType('model-viewer', {
       isComponent: el => el.tagName === 'MODEL-VIEWER',
       model: {
         defaults: {
-          droppable: false,
           traits: [
             { type: 'text', name: 'src', label: 'Model (glb/gltf/usdz)' },
             { type: 'text', name: 'poster', label: 'Poster (image)' },
             { type: 'checkbox', name: 'camera-controls', label: 'Camera controls', value: true },
             { type: 'checkbox', name: 'auto-rotate', label: 'Auto rotate', value: true },
             { type: 'checkbox', name: 'disable-zoom', label: 'Disable zoom', value: true },
-          ]
+          ],
+          droppable: false,
         },
         init() {
-          this.on('dblclick', () => {
-            if (window._858_pickAsset) {
-              window._858_pickAsset((url) => {
-                this.addAttributes({ src: url });
-              }, ['model/gltf-binary','model/gltf+json','model/usd','model/*','application/octet-stream']);
-            }
-          });
+          this.on('dblclick', () => window._858_pickAsset?.((url) => {
+            this.addAttributes({ src: url });
+          }, ['model/*','application/octet-stream','application/zip','application/octet-stream']));
         }
       }
     });
 
-    // Open categories
-    bm.getCategories().forEach(cat => cat.set('open', true));
+    domc.addType('image', {
+      isComponent: el => el.tagName === 'IMG',
+      model: {
+        init() {
+          this.on('dblclick', () => window._858_pickAsset?.((url) => {
+            this.addAttributes({ src: url });
+          }, ['image/*']));
+        }
+      }
+    });
+
+    bm.getCategories().forEach(c => c.set('open', true));
   }
 
   if (window.grapesjs) {
