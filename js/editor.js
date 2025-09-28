@@ -1,8 +1,8 @@
 /* =========================================================================
    858 Builder — editor.js
-   - Reliable Save/Pages
-   - Right-side Assets dock + modal fallback
-   - Global double-click picker for IMG / VIDEO / MODEL-VIEWER
+   - Save/Pages
+   - Assets dock + modal uploader (click/drag/paste)
+   - Global dbl-click picker for IMG / VIDEO / MODEL-VIEWER
    ======================================================================= */
 
 const GH_OWNER  = 'farouk858';
@@ -247,9 +247,8 @@ function showPagesModal(editor, items) {
   });
 }
 
-/* ---------- Assets Dock (fixed, high z-index) ---------- */
+/* ---------- Assets Dock (high z-index) ---------- */
 function mountAssetsDock(editor) {
-  // Create only once
   if (document.getElementById('am-dock')) return;
 
   const dock = document.createElement('div');
@@ -284,13 +283,9 @@ function mountAssetsDock(editor) {
   document.body.appendChild(dock);
 
   const am = editor.AssetManager;
-  // Render Asset Manager list inside the dock
   am.render(dock.querySelector('#am-body'));
-
-  // Load existing /assets into the library once
   loadExistingAssetsInto(am).catch(e => errToast('Load assets failed', e));
 
-  // Upload picker
   const fileInput = dock.querySelector('#am-upload');
   dock.querySelector('#am-pick').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async (e) => {
@@ -304,7 +299,6 @@ function mountAssetsDock(editor) {
     fileInput.value = '';
   });
 
-  // Dock drop zone
   dock.addEventListener('dragover', e => { e.preventDefault(); });
   dock.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -317,7 +311,6 @@ function mountAssetsDock(editor) {
     if (added.length) am.add(added);
   });
 
-  // Toggle visibility
   dock.querySelector('#am-toggle').addEventListener('click', () => {
     if (dock.style.display === 'none') {
       dock.style.display = 'flex';
@@ -327,17 +320,39 @@ function mountAssetsDock(editor) {
     }
   });
 
-  // Define picker API (also used by dbl-click)
   window._858_pickAsset = (cb) => {
     am.open({});
     const sel = (m) => {
       const src = m && m.get && m.get('src');
       if (src) cb(src);
       am.off('select', sel);
-      // keep dock open
     };
     am.on('select', sel);
   };
+}
+
+/* ---------- Modal uploader hook (fixes “nothing happens”) ---------- */
+async function assetUploaderHandler(e, am) {
+  try {
+    // Files can arrive via drop (dataTransfer), input[type=file] (target.files), or paste (clipboardData)
+    const list =
+      (e?.dataTransfer && e.dataTransfer.files) ||
+      (e?.target && e.target.files) ||
+      (e?.clipboardData && e.clipboardData.files);
+
+    if (!list || !list.length) return;
+
+    const added = [];
+    for (const f of list) {
+      const url = await uploadAssetToGitHub(f);
+      added.push({ src: url, name: f.name });
+    }
+    if (added.length) am.add(added);
+
+    toast(`Uploaded ${added.length} asset${added.length>1?'s':''} ✓`);
+  } catch (err) {
+    errToast('Upload failed', err);
+  }
 }
 
 /* ---------- main ---------- */
@@ -350,7 +365,8 @@ function mountAssetsDock(editor) {
     fromElement: false,
 
     assetManager: {
-      upload: false,            // handled by our dock
+      // We provide our own uploader via setConfig below
+      upload: false,
       embedAsBase64: false,
       autoAdd: true,
     },
@@ -365,6 +381,12 @@ function mountAssetsDock(editor) {
 
     canvas: { scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'] },
     plugins: ['blocks-core-858'],
+  });
+
+  // Attach uploader for BOTH the modal and any internal pickers
+  editor.AssetManager.setConfig({
+    ...editor.AssetManager.getConfig(),
+    uploadFile: (e) => assetUploaderHandler(e, editor.AssetManager),
   });
 
   // Dirty tracking
@@ -387,7 +409,7 @@ function mountAssetsDock(editor) {
     `);
   }
 
-  // Top bar buttons (Assets restored)
+  // Top bar buttons
   const panels = editor.Panels;
   panels.addButton('options', {
     id: 'save-now', label: 'Save', className: 'gjs-pn-btn',
@@ -427,7 +449,6 @@ function mountAssetsDock(editor) {
   });
 
   // GLOBAL dbl-click picker → works for IMG / VIDEO / MODEL-VIEWER
-  // (uses _858_pickAsset; falls back to AM modal)
   function ensurePicker(editor) {
     if (!window._858_pickAsset) {
       window._858_pickAsset = (cb) => {
@@ -453,9 +474,7 @@ function mountAssetsDock(editor) {
     } else if (tag === 'VIDEO') {
       window._858_pickAsset?.((url) => {
         cmp.addAttributes({ src: url });
-        // update <source> if present
-        const source = el.querySelector('source');
-        if (source) { source.src = url; el.load?.(); }
+        const source = el.querySelector('source'); if (source) { source.src = url; el.load?.(); }
       });
     } else if (tag === 'MODEL-VIEWER') {
       window._858_pickAsset?.((url) => cmp.addAttributes({ src: url }));
@@ -467,10 +486,6 @@ function mountAssetsDock(editor) {
     editor.BlockManager.getCategories().forEach(cat => cat.set('open', true));
     updatePagesBadge();
     toast('Authorized ✓  Editor loaded');
-
-    // Mount dock (super-high z-index so it’s always visible)
-    mountAssetsDock(editor);
-
-    // If the dock is hidden or fails, Assets button still opens modal
+    mountAssetsDock(editor); // right-side dock (also supports upload)
   });
 })();
