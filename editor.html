@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>858 Builder — Minimal Boot Test</title>
+  <title>858 Builder — Minimal Boot + 3D</title>
 
   <!-- GrapesJS (pinned) -->
   <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
@@ -22,7 +22,12 @@
   <div id="gjs"></div>
   <div id="error"></div>
 
+  <!-- Core GrapesJS -->
   <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
+
+  <!-- Model Viewer for 3D -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+
   <script>
     (function(){
       const showErr = (msg) => {
@@ -37,27 +42,33 @@
           container: '#gjs',
           height: '100vh',
           fromElement: false,
-          storageManager: false
+          storageManager: false,
+          canvas: {
+            // also load model-viewer inside the canvas iframe (belt & braces)
+            scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
+          }
         });
 
-        // Very simple starter content so we SEE something if it booted
-        if (!editor.getComponents().length) {
-          editor.setComponents(`
-            <section style="padding:40px 6vw; color:#fff; background:#000">
-              <h1 style="margin:0 0 10px; font-family:system-ui">GrapesJS booted ✓</h1>
-              <p style="opacity:.75; font-family:system-ui">
-                If you can read this, the editor mounted correctly.
-              </p>
-            </section>
-          `);
-        }
+        // Starter content so we SEE something if it booted
+        editor.setComponents(`
+          <section style="padding:40px 6vw; color:#fff; background:#000">
+            <h1 style="margin:0 0 10px; font-family:system-ui">GrapesJS + 3D ✓</h1>
+            <p style="opacity:.75; font-family:system-ui">
+              If you see a rotating model below, 3D works.
+            </p>
+            <model-viewer src="models/sample.glb" alt="Sample 3D"
+              style="width:100%;height:420px;background:transparent"
+              camera-controls auto-rotate disable-zoom
+              exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
+          </section>
+        `);
 
         editor.on('load', () => console.log('[gjs] loaded OK'));
       } catch (e) {
         showErr(e && e.message ? e.message : String(e));
       }
 
-      // Also catch runtime errors after load
+      // Catch runtime errors after load
       window.addEventListener('error', (ev) => {
         const msg = (ev && ev.message) ? ev.message : 'Unknown runtime error';
         const file = ev && ev.filename ? ` @ ${ev.filename}:${ev.lineno}:${ev.colno}` : '';
@@ -69,8 +80,5 @@
       });
     })();
   </script>
-  <!-- Model Viewer for 3D (optional step 2) -->
-<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-
 </body>
 </html>
