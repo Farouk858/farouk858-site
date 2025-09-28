@@ -1,11 +1,6 @@
 /* =========================================================================
    858 Builder — editor.js
-   - Auth gate (case-insensitive allow list)
-   - Asset Manager: upload to GitHub /assets
-   - Blocks plugin + 3D
-   - Save button + Shift+S (safe path/slug)
-   - Pages manager + slugify (no spaces)
-   - Undo/Redo keymaps
+   Reliable save, pages, assets, and clear toasts
    ======================================================================= */
 
 const GH_OWNER  = 'farouk858';
@@ -14,8 +9,9 @@ const GH_BRANCH = 'main';
 const ALLOW_LIST = ['farouk858'];
 
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
+let DIRTY = false;
 
-// Capture token if returned here
+/* -------------- token helpers -------------- */
 (function captureTokenFromHash() {
   const m = location.hash && location.hash.match(/access_token=([^&]+)/);
   if (m) {
@@ -23,19 +19,19 @@ let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
     history.replaceState({}, document.title, location.pathname + location.search);
   }
 })();
+const token = () => localStorage.getItem('gh_token') || null;
 
-function token() { return localStorage.getItem('gh_token') || null; }
-
-function toast(msg, ms = 2200) {
+/* -------------- UI helpers -------------- */
+function toast(msg, ms = 2600) {
   let el = document.getElementById('gh-toast');
   if (!el) {
     el = document.createElement('div');
     el.id = 'gh-toast';
     el.style.cssText = `
       position:fixed; right:16px; bottom:16px; z-index:99999;
-      background:rgba(0,0,0,.85); color:#fff; padding:10px 14px;
+      background:rgba(0,0,0,.9); color:#fff; padding:10px 14px;
       border-radius:10px; font:13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-      box-shadow:0 6px 20px rgba(0,0,0,.35); transition:opacity .2s;`;
+      box-shadow:0 6px 20px rgba(0,0,0,.35); transition:opacity .2s; max-width:60ch;`;
     document.body.appendChild(el);
   }
   el.textContent = msg;
@@ -43,41 +39,44 @@ function toast(msg, ms = 2200) {
   clearTimeout(el._t);
   el._t = setTimeout(() => (el.style.opacity = '0'), ms);
 }
+function errToast(title, e) {
+  console.error(title, e);
+  toast(`${title}: ${e?.message || e}`, 4000);
+}
 
+/* -------------- auth gate -------------- */
 async function verifyOrRedirect() {
   const t = token();
-  if (!t) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
+  if (!t) { location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
 
   const u = await fetch('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
-  if (!u.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
+  if (!u.ok) { location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
   const user = await u.json();
-
-  const allowed = ALLOW_LIST.map(s => s.toLowerCase());
-  if (!allowed.includes((user.login || '').toLowerCase())) {
-    window.location.replace('/farouk858-site/signin.html'); throw new Error('user-denied');
+  if (!ALLOW_LIST.map(s => s.toLowerCase()).includes((user.login||'').toLowerCase())) {
+    location.replace('/farouk858-site/signin.html'); throw new Error('user-denied');
   }
 
   const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`, {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
-  if (!r.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('repo-bad'); }
+  if (!r.ok) { location.replace('/farouk858-site/signin.html'); throw new Error('repo-bad'); }
   const repo = await r.json();
   const perm = repo.permissions || {};
-  if (!perm.push && !perm.admin) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-perms'); }
+  if (!perm.push && !perm.admin) { location.replace('/farouk858-site/signin.html'); throw new Error('no-perms'); }
 
   return true;
 }
 
-/* ---------------- GitHub helpers ---------------- */
+/* -------------- GitHub helpers -------------- */
 async function ghGet(path) {
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
     { headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' } }
   );
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error('GET failed ' + r.status);
+  if (!r.ok) throw new Error('GET ' + path + ' failed: ' + r.status);
   return r.json();
 }
 async function getFileSha(path) {
@@ -85,39 +84,34 @@ async function getFileSha(path) {
   return meta && meta.sha ? meta.sha : null;
 }
 async function putFile({ path, content, message, sha }) {
-  const body = {
-    message,
-    branch: GH_BRANCH,
-    content: btoa(unescape(encodeURIComponent(content))),
-  };
+  const body = { message, branch: GH_BRANCH, content };
   if (sha) body.sha = sha;
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}`,
     { method: 'PUT', headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }
   );
-  if (!r.ok) throw new Error(`PUT failed ${r.status}: ${await r.text()}`);
+  if (!r.ok) throw new Error(`PUT ${path} failed ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
-/* ---------------- Asset upload to /assets ---------------- */
+/* -------------- Asset upload (/assets) -------------- */
+const b64 = (str) => btoa(unescape(encodeURIComponent(str)));
 function slugFileName(name) {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9.\-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+  return name.trim().toLowerCase().replace(/[^a-z0-9.\-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
 }
 async function uploadAssetToGitHub(file) {
   const buf = await file.arrayBuffer();
   const name = `${Date.now()}-${slugFileName(file.name)}`;
   const path = `assets/${name}`;
-  await putFile({ path, content: btoa(String.fromCharCode(...new Uint8Array(buf))), message: `asset: ${name}` });
-  // Return relative path that works on Pages and in the canvas
+  await putFile({
+    path,
+    content: btoa(String.fromCharCode(...new Uint8Array(buf))),
+    message: `asset: ${name}`,
+  });
   return `assets/${name}`;
 }
 
-/* ---------------- Build document ---------------- */
+/* -------------- Build document -------------- */
 function buildDocFromEditor(editor) {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
@@ -133,7 +127,7 @@ ${html}
 </body></html>`.trim();
 }
 
-/* ---------------- Pages helpers ---------------- */
+/* -------------- Pages helpers -------------- */
 function slugPageSlug(s) {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
 }
@@ -141,55 +135,70 @@ async function listPages() {
   const root = await ghGet('');
   const pagesDir = await ghGet('pages');
   const items = [];
-  if (root && Array.isArray(root)) {
+  if (Array.isArray(root)) {
     const idx = root.find(f => f.name === 'index.html');
     if (idx) items.push({ name: 'index.html', path: 'index.html' });
   }
-  if (pagesDir && Array.isArray(pagesDir)) {
+  if (Array.isArray(pagesDir)) {
     pagesDir.filter(f => f.type === 'file' && f.name.endsWith('.html'))
       .forEach(f => items.push({ name: f.name, path: `pages/${f.name}` }));
   }
   return items;
 }
 async function loadPage(editor, path) {
-  const meta = await ghGet(path);
-  if (!meta) { toast('Page not found: ' + path, 2500); return; }
-  const content = decodeURIComponent(escape(atob(meta.content || '')));
-  const tmp = document.createElement('html'); tmp.innerHTML = content;
-  editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
-  editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
-  CURRENT_PATH = path;
-  localStorage.setItem('gjs-current-path', CURRENT_PATH);
-  updatePagesBadge();
-  toast('Loaded: ' + path);
+  try {
+    const meta = await ghGet(path);
+    if (!meta) throw new Error('not found');
+    const content = decodeURIComponent(escape(atob(meta.content || '')));
+    const tmp = document.createElement('html'); tmp.innerHTML = content;
+    editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
+    editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
+    CURRENT_PATH = path;
+    localStorage.setItem('gjs-current-path', CURRENT_PATH);
+    DIRTY = false;
+    updatePagesBadge();
+    toast('Loaded: ' + path);
+  } catch (e) { errToast('Load failed', e); }
 }
 async function savePage(editor, path = CURRENT_PATH) {
-  if (!path) path = 'index.html';
-  const doc = buildDocFromEditor(editor);
-  let sha = await getFileSha(path);
   try {
-    await putFile({ path, content: doc, message: `save: ${path} via editor`, sha });
-  } catch (err) {
-    if ((err.message || '').includes('409')) {
-      sha = await getFileSha(path);
-      await putFile({ path, content: doc, message: `save: ${path} via editor (retry)`, sha });
-    } else throw err;
-  }
-  CURRENT_PATH = path;
-  localStorage.setItem('gjs-current-path', CURRENT_PATH);
-  updatePagesBadge();
-  toast('Saved: ' + path);
+    const full = buildDocFromEditor(editor);
+    const enc = b64(full);
+    let sha = await getFileSha(path);
+    try {
+      await putFile({ path, content: enc, message: `save: ${path} via editor`, sha });
+    } catch (e) {
+      if ((e.message||'').includes('409')) { // retry w/ fresh SHA
+        sha = await getFileSha(path);
+        await putFile({ path, content: enc, message: `save: ${path} via editor (retry)`, sha });
+      } else { throw e; }
+    }
+    CURRENT_PATH = path;
+    localStorage.setItem('gjs-current-path', CURRENT_PATH);
+    DIRTY = false;
+    updatePagesBadge();
+    toast('Saved ✓ ' + path);
+  } catch (e) { errToast('Save failed', e); }
 }
 function saveAsDialog(editor) {
-  const slug = slugPageSlug(prompt('Save As — page slug (e.g. home-page):') || '');
-  if (!slug) return;
+  const raw = prompt('Save As — page slug (e.g. home-page):');
+  if (!raw) return;
+  const slug = slugPageSlug(raw);
   savePage(editor, `pages/${slug}.html`);
 }
 
-/* ---------------- Pages UI ---------------- */
+/* -------------- Pages UI -------------- */
 function updatePagesBadge() {
   const el = document.getElementById('pages-badge');
-  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}`;
+  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}${DIRTY ? ' • unsaved' : ''}`;
+}
+function confirmIfDirty(cb) {
+  if (!DIRTY) return cb();
+  if (confirm('You have unsaved changes. Save before continuing?')) {
+    cb('save');
+  } else {
+    cb('discard');
+  }
 }
 function showPagesModal(editor, items) {
   const listHtml = items.map(it => `
@@ -226,32 +235,39 @@ function showPagesModal(editor, items) {
     editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
     editor.setStyle('');
     await savePage(editor, `pages/${slug}.html`);
-    toast('Created: pages/' + slug + '.html');
     const again = await listPages(); showPagesModal(editor, again);
   });
-  root.querySelector('#pg-save')?.addEventListener('click', async () => { await savePage(editor); });
+  root.querySelector('#pg-save')?.addEventListener('click', async () => savePage(editor));
   root.querySelector('#pg-saveas')?.addEventListener('click', () => saveAsDialog(editor));
-  root.querySelector('#pg-reload')?.addEventListener('click', async () => { const again = await listPages(); showPagesModal(editor, again); });
+  root.querySelector('#pg-reload')?.addEventListener('click', async () => {
+    const again = await listPages(); showPagesModal(editor, again);
+  });
 
   root.querySelectorAll('button[data-open]')?.forEach(btn => {
-    btn.addEventListener('click', async () => { await loadPage(editor, btn.getAttribute('data-open')); const again = await listPages(); showPagesModal(editor, again); });
+    btn.addEventListener('click', () => confirmIfDirty(async (choice) => {
+      if (choice === 'save') await savePage(editor);
+      await loadPage(editor, btn.getAttribute('data-open'));
+      const again = await listPages(); showPagesModal(editor, again);
+    }));
   });
+
   root.querySelectorAll('button[data-dup]')?.forEach(btn => {
     btn.addEventListener('click', async () => {
       const src = btn.getAttribute('data-dup');
-      const def = src.includes('.html') ? src.replace('.html','-copy.html') : (src + '-copy.html');
+      const def = src.replace('.html','-copy.html');
       const target = prompt(`Duplicate "${src}" to:`, def);
       if (!target) return;
       const meta = await ghGet(src);
-      const content = decodeURIComponent(escape(atob(meta.content || '')));
-      await putFile({ path: target, content: btoa(unescape(encodeURIComponent(content))), message: `duplicate: ${target}` });
+      const content = meta?.content ? meta.content : null;
+      if (!content) return;
+      await putFile({ path: target, content, message: `duplicate: ${target}` });
       const again = await listPages(); showPagesModal(editor, again);
       toast('Duplicated to: ' + target);
     });
   });
 }
 
-/* ---------------- Main ---------------- */
+/* -------------- main -------------- */
 (async function main() {
   try { await verifyOrRedirect(); } catch { return; }
 
@@ -260,16 +276,11 @@ function showPagesModal(editor, items) {
     height: '100vh',
     fromElement: false,
 
-    // 🔸 Asset Manager uploads to GitHub /assets
     assetManager: {
       upload: true,
       embedAsBase64: false,
       autoAdd: true,
-      // UI label
       uploadText: 'Drop files here or click to upload. Files are saved to /assets in your repo.',
-      // Where dropped images/videos go by default
-      uploadName: 'file',
-      // Called when user drops/selects files
       uploadFile: async (e) => {
         const files = e.dataTransfer ? e.dataTransfer.files : e.target.files;
         if (!files || !files.length) return;
@@ -279,10 +290,7 @@ function showPagesModal(editor, items) {
           try {
             const url = await uploadAssetToGitHub(file);
             added.push({ src: url });
-          } catch (err) {
-            console.error('Upload failed', err);
-            toast('Upload failed: ' + file.name, 3000);
-          }
+          } catch (err) { errToast('Upload failed', err); }
         }
         if (added.length) am.add(added);
       },
@@ -301,10 +309,16 @@ function showPagesModal(editor, items) {
     pluginsOpts: {},
   });
 
-  // Make the Asset Manager picker callable from blocks
-  window._858_pickAsset = function (cb, acceptMimes) {
+  // mark dirty on changes
+  editor.on('change', () => { DIRTY = true; updatePagesBadge(); });
+  window.addEventListener('beforeunload', (e) => {
+    if (!DIRTY) return;
+    e.preventDefault(); e.returnValue = '';
+  });
+
+  // Expose picker to blocks: open Assets, return selected URL
+  window._858_pickAsset = function (cb) {
     const am = editor.AssetManager;
-    // Open AM; when user selects asset, call cb with its URL
     am.open({});
     const sel = (m) => {
       const src = m && m.get && m.get('src');
@@ -315,7 +329,7 @@ function showPagesModal(editor, items) {
     am.on('select', sel);
   };
 
-  // Starter content just once
+  // Starter content if first time
   if (!editor.getComponents().length) {
     editor.setComponents(`
       <section style="padding:40px 6vw; color:#fff; background:#000">
@@ -331,13 +345,10 @@ function showPagesModal(editor, items) {
     `);
   }
 
-  // -------- Top bar buttons --------
+  // Top bar buttons
   const panels = editor.Panels;
-  // Save button (in addition to Shift+S)
   panels.addButton('options', {
-    id: 'save-now',
-    label: 'Save',
-    className: 'gjs-pn-btn',
+    id: 'save-now', label: 'Save', className: 'gjs-pn-btn',
     attributes: { title: 'Save (Shift+S)' },
     command: () => savePage(editor)
   });
@@ -351,13 +362,16 @@ function showPagesModal(editor, items) {
     attributes: { title: 'Toggle Blocks' },
     command: () => editor.Blocks.open()
   });
+  panels.addButton('options', {
+    id: 'open-assets', label: 'Assets', className: 'gjs-pn-btn',
+    attributes: { title: 'Open Asset Manager' },
+    command: () => editor.AssetManager.open({})
+  });
 
-  // -------- Keymaps (Undo/Redo + Save) --------
+  // Keymaps (Undo/Redo + Save)
   const km = editor.Keymaps;
-  km.add('core:undo', 'meta+z');
-  km.add('core:redo', 'shift+meta+z');
-  km.add('core:undo-ctrl', 'ctrl+z');
-  km.add('core:redo-ctrl', 'shift+ctrl+z');
+  km.add('core:undo', 'meta+z');      km.add('core:redo', 'shift+meta+z');
+  km.add('core:undo-ctrl', 'ctrl+z'); km.add('core:redo-ctrl', 'shift+ctrl+z');
 
   document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(editor); }
@@ -365,7 +379,8 @@ function showPagesModal(editor, items) {
     if (e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault();
       const slug = slugPageSlug(prompt('New page slug (e.g. home-page):') || '');
       if (!slug) return;
-      editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`); editor.setStyle('');
+      editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
+      editor.setStyle('');
       savePage(editor, `pages/${slug}.html`);
     }
     if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(editor); }
@@ -374,6 +389,7 @@ function showPagesModal(editor, items) {
   editor.on('load', () => {
     editor.Blocks.open();
     editor.BlockManager.getCategories().forEach(cat => cat.set('open', true));
+    updatePagesBadge();
     toast('Authorized ✓  Editor loaded');
   });
 })();
