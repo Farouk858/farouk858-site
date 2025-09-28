@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>858 Builder — Editor</title>
 
-  <!-- GrapesJS (pinned) -->
   <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
   <style>
     html,body { height:100%; margin:0; background:#0b0b0b; }
@@ -16,16 +15,12 @@
 <body>
   <div id="gjs"></div>
 
-  <!-- GrapesJS core -->
+  <!-- Core -->
   <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
-
-  <!-- model-viewer both on host and inside the canvas iframe -->
+  <!-- Make model-viewer available on host and inside canvas -->
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
-  <!-- Global auth helper (now iframe-aware) -->
-  <script src="js/auth.js"></script>
-
-  <!-- Main editor (save, pages, etc.) -->
+  <!-- Editor logic (contains the auth gate) -->
   <script src="js/editor.js"></script>
 </body>
 </html>
