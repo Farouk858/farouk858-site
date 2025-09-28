@@ -1,57 +1,13 @@
 /* =========================================================================
-   858 Builder — editor.js (3D + Save + Pages + global-shortcuts injection)
+   858 Builder — editor.js (Auth gate + 3D + Save + Pages)
    ======================================================================= */
 
-/* ---------- CONFIG ---------- */
 const GH_OWNER  = 'farouk858';
 const GH_REPO   = 'farouk858-site';
 const GH_BRANCH = 'main';
-/* --------------------------- */
 
-// Track which file you’re editing right now
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
-/* ---------------- GrapesJS INIT ---------------- */
-const editor = grapesjs.init({
-  container: '#gjs',
-  height: '100vh',
-  fromElement: false,
-
-  storageManager: false,
-
-  assetManager: { upload: false, embedAsBase64: true, autoAdd: true },
-
-  styleManager: {
-    sectors: [
-      { name: 'Layout',      open: true,  buildProps: ['display','position','top','left','right','bottom','width','height','margin','padding'] },
-      { name: 'Typography',  open: false, buildProps: ['font-family','font-size','font-weight','color','line-height','letter-spacing','text-align'] },
-      { name: 'Decorations', open: false, buildProps: ['background-color','background-image','border','border-radius','box-shadow','opacity'] },
-    ]
-  },
-
-  canvas: {
-    scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
-  },
-});
-
-/* Starter content (only once) */
-if (!editor.getComponents().length) {
-  editor.setComponents(`
-    <section style="padding:40px 6vw; color:#fff; background:#000">
-      <h1 style="margin:0 0 10px; font-family:system-ui">Editor ready ✓</h1>
-      <p style="opacity:.75; font-family:system-ui">
-        Shortcuts: <strong>Shift+A</strong> Sign in · <strong>Shift+S</strong> Save ·
-        <strong>Shift+O</strong> Pages · <strong>Shift+N</strong> New page · <strong>Shift+P</strong> Save As
-      </p>
-      <model-viewer src="models/sample.glb" alt="Sample 3D"
-        style="width:100%;height:420px;background:transparent"
-        camera-controls auto-rotate disable-zoom
-        exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
-    </section>
-  `);
-}
-
-/* ---------------- UI helpers ---------------- */
 function toast(msg, ms = 2000) {
   let el = document.getElementById('gh-toast');
   if (!el) {
@@ -70,14 +26,38 @@ function toast(msg, ms = 2000) {
   clearTimeout(el._t);
   el._t = setTimeout(() => (el.style.opacity = '0'), ms);
 }
-function isAuthed() { return !!localStorage.getItem('gh_token'); }
+
+function token() { return localStorage.getItem('gh_token') || null; }
+
+/* ---------------- Hard gate: verify before booting GrapesJS ---------------- */
+async function verifyOrRedirect() {
+  const t = token();
+  if (!t) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
+
+  // Verify user & repo access
+  const u = await fetch('https://api.github.com/user', {
+    headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
+  });
+  if (!u.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
+  const user = await u.json();
+  if (user.login !== GH_OWNER) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-denied'); }
+
+  const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`, {
+    headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
+  });
+  if (!r.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('repo-bad'); }
+  const repo = await r.json();
+  const perm = repo.permissions || {};
+  if (!perm.push && !perm.admin) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-perms'); }
+
+  return true;
+}
 
 /* ---------------- GitHub API helpers ---------------- */
 async function ghGet(path) {
-  const token = localStorage.getItem('gh_token');
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+    { headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' } }
   );
   if (r.status === 404) return null;
   if (!r.ok) throw new Error('GET failed ' + r.status);
@@ -88,7 +68,6 @@ async function getFileSha(path) {
   return meta && meta.sha ? meta.sha : null;
 }
 async function putFile({ path, content, message, sha }) {
-  const token = localStorage.getItem('gh_token');
   const body = {
     message,
     branch: GH_BRANCH,
@@ -97,15 +76,14 @@ async function putFile({ path, content, message, sha }) {
   if (sha) body.sha = sha;
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}`,
-    { method: 'PUT', headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }
+    { method: 'PUT', headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }
   );
   if (!r.ok) throw new Error(`PUT failed ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
-/* ---------------- Save/Load pages ---------------- */
-// ✅ Updated: inject global-shortcuts.js automatically
-function buildDocFromEditor() {
+/* ---------------- Build full HTML (inject global shortcut) ---------------- */
+function buildDocFromEditor(editor) {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
   return `<!doctype html>
@@ -116,53 +94,11 @@ function buildDocFromEditor() {
 <style>${css}</style>
 </head><body>
 ${html}
-
-<!-- Always inject global shortcuts -->
 <script src="js/global-shortcuts.js"></script>
 </body></html>`.trim();
 }
 
-async function loadPage(path) {
-  if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
-  const meta = await ghGet(path);
-  if (!meta) { toast('Page not found: ' + path, 2500); return; }
-  const content = decodeURIComponent(escape(atob(meta.content || '')));
-  const tmp = document.createElement('html'); tmp.innerHTML = content;
-  editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
-  editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
-  CURRENT_PATH = path;
-  localStorage.setItem('gjs-current-path', CURRENT_PATH);
-  updatePagesBadge();
-  toast('Loaded: ' + path);
-}
-async function savePage(path = CURRENT_PATH) {
-  if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
-  const doc = buildDocFromEditor();
-  let sha = await getFileSha(path);
-  try {
-    await putFile({ path, content: doc, message: `save: ${path} via editor`, sha });
-  } catch (err) {
-    if ((err.message || '').includes('409')) {
-      sha = await getFileSha(path);
-      await putFile({ path, content: doc, message: `save: ${path} via editor (retry)`, sha });
-    } else throw err;
-  }
-  CURRENT_PATH = path;
-  localStorage.setItem('gjs-current-path', CURRENT_PATH);
-  updatePagesBadge();
-  toast('Saved: ' + path);
-}
-async function saveAsDialog() {
-  const slug = prompt('Save As — page slug (e.g. about):');
-  if (!slug) return;
-  await savePage(`pages/${slug}.html`);
-}
-
-/* ---------------- Pages Manager UI ---------------- */
-function updatePagesBadge() {
-  const el = document.getElementById('pages-badge');
-  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}`;
-}
+/* ---------------- Pages helpers ---------------- */
 async function listPages() {
   const root = await ghGet('');
   const pagesDir = await ghGet('pages');
@@ -177,7 +113,49 @@ async function listPages() {
   }
   return items;
 }
-function showPagesModal(items) {
+
+async function loadPage(editor, path) {
+  const meta = await ghGet(path);
+  if (!meta) { toast('Page not found: ' + path, 2500); return; }
+  const content = decodeURIComponent(escape(atob(meta.content || '')));
+  const tmp = document.createElement('html'); tmp.innerHTML = content;
+  editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
+  editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
+  CURRENT_PATH = path;
+  localStorage.setItem('gjs-current-path', CURRENT_PATH);
+  updatePagesBadge();
+  toast('Loaded: ' + path);
+}
+
+async function savePage(editor, path = CURRENT_PATH) {
+  const doc = buildDocFromEditor(editor);
+  let sha = await getFileSha(path);
+  try {
+    await putFile({ path, content: doc, message: `save: ${path} via editor`, sha });
+  } catch (err) {
+    if ((err.message || '').includes('409')) {
+      sha = await getFileSha(path);
+      await putFile({ path, content: doc, message: `save: ${path} via editor (retry)`, sha });
+    } else throw err;
+  }
+  CURRENT_PATH = path;
+  localStorage.setItem('gjs-current-path', CURRENT_PATH);
+  updatePagesBadge();
+  toast('Saved: ' + path);
+}
+
+function saveAsDialog(editor) {
+  const slug = prompt('Save As — page slug (e.g. about):');
+  if (!slug) return;
+  savePage(editor, `pages/${slug}.html`);
+}
+
+/* ---------------- Pages Manager UI ---------------- */
+function updatePagesBadge() {
+  const el = document.getElementById('pages-badge');
+  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}`;
+}
+function showPagesModal(editor, items) {
   const listHtml = items.map(it => `
     <li style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 0;border-bottom:1px solid #222">
       <span style="font-family:system-ui;color:#eee">${it.path}</span>
@@ -213,16 +191,16 @@ function showPagesModal(items) {
     if (!slug) return;
     editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
     editor.setStyle('');
-    await savePage(`pages/${slug}.html`);
+    await savePage(editor, `pages/${slug}.html`);
     toast('Created: pages/' + slug + '.html');
-    const again = await listPages(); showPagesModal(again);
+    const again = await listPages(); showPagesModal(editor, again);
   });
-  root.querySelector('#pg-save')?.addEventListener('click', async () => { await savePage(); });
-  root.querySelector('#pg-saveas')?.addEventListener('click', saveAsDialog);
-  root.querySelector('#pg-reload')?.addEventListener('click', async () => { const again = await listPages(); showPagesModal(again); });
+  root.querySelector('#pg-save')?.addEventListener('click', async () => { await savePage(editor); });
+  root.querySelector('#pg-saveas')?.addEventListener('click', () => saveAsDialog(editor));
+  root.querySelector('#pg-reload')?.addEventListener('click', async () => { const again = await listPages(); showPagesModal(editor, again); });
 
   root.querySelectorAll('button[data-open]')?.forEach(btn => {
-    btn.addEventListener('click', async () => { await loadPage(btn.getAttribute('data-open')); const again = await listPages(); showPagesModal(again); });
+    btn.addEventListener('click', async () => { await loadPage(editor, btn.getAttribute('data-open')); const again = await listPages(); showPagesModal(editor, again); });
   });
   root.querySelectorAll('button[data-dup]')?.forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -234,51 +212,70 @@ function showPagesModal(items) {
       const tmp = document.createElement('html'); tmp.innerHTML = content;
       editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
       editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
-      await savePage(target);
-      const again = await listPages(); showPagesModal(again);
+      await savePage(editor, target);
+      const again = await listPages(); showPagesModal(editor, again);
       toast('Duplicated to: ' + target);
     });
   });
 }
 
-/* Top-bar “Sign in” & “Pages” buttons */
-const panels = editor.Panels;
+/* ---------------- Main boot ---------------- */
+(async function main() {
+  try {
+    await verifyOrRedirect();  // 🔒 stop here if not authorized
+  } catch { return; }
 
-panels.addButton('options', {
-  id: 'signin',
-  label: 'Sign in',
-  attributes: { title: 'GitHub Sign in (Shift + A)' },
-  className: 'gjs-pn-btn',
-  command: () => { window.location.href = 'https://858-builder.faroukalaofa.workers.dev/login'; }
-});
+  const editor = grapesjs.init({
+    container: '#gjs',
+    height: '100vh',
+    fromElement: false,
+    storageManager: false,
+    assetManager: { upload: false, embedAsBase64: true, autoAdd: true },
+    styleManager: {
+      sectors: [
+        { name: 'Layout',      open: true,  buildProps: ['display','position','top','left','right','bottom','width','height','margin','padding'] },
+        { name: 'Typography',  open: false, buildProps: ['font-family','font-size','font-weight','color','line-height','letter-spacing','text-align'] },
+        { name: 'Decorations', open: false, buildProps: ['background-color','background-image','border','border-radius','box-shadow','opacity'] },
+      ]
+    },
+    canvas: { scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'] },
+  });
 
-panels.addButton('options', {
-  id: 'open-pages',
-  label: 'Pages',
-  attributes: { title: 'Pages Manager' },
-  className: 'gjs-pn-btn',
-  command: async () => {
-    if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
-    const items = await listPages();
-    showPagesModal(items);
-  },
-});
-
-/* ---------------- Keyboard shortcuts ---------------- */
-document.addEventListener('keydown', (e) => {
-  if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(); }
-  if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault();
-    (async () => { if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; } const items = await listPages(); showPagesModal(items); })();
+  if (!editor.getComponents().length) {
+    editor.setComponents(`
+      <section style="padding:40px 6vw; color:#fff; background:#000">
+        <h1 style="margin:0 0 10px; font-family:system-ui">Editor ready ✓</h1>
+        <p style="opacity:.75; font-family:system-ui">
+          Shortcuts: <strong>Shift+S</strong> Save · <strong>Shift+O</strong> Pages · <strong>Shift+N</strong> New page · <strong>Shift+P</strong> Save As
+        </p>
+        <model-viewer src="models/sample.glb" alt="Sample 3D"
+          style="width:100%;height:420px;background:transparent"
+          camera-controls auto-rotate disable-zoom
+          exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
+      </section>
+    `);
   }
-  if (e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault();
-    const slug = prompt('New page slug (e.g. about):'); if (!slug) return;
-    editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`); editor.setStyle(''); savePage(`pages/${slug}.html`);
-  }
-  if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(); }
-});
 
-/* On load */
-editor.on('load', () => {
-  console.log('[gjs] loaded OK');
-  if (isAuthed()) toast(`Signed in ✓  Editing: ${CURRENT_PATH}`);
-});
+  // Top bar buttons
+  const panels = editor.Panels;
+  panels.addButton('options', {
+    id: 'open-pages',
+    label: 'Pages',
+    className: 'gjs-pn-btn',
+    attributes: { title: 'Pages Manager' },
+    command: async () => { const items = await listPages(); showPagesModal(editor, items); }
+  });
+
+  // Shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(editor); }
+    if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); (async () => { const items = await listPages(); showPagesModal(editor, items); })(); }
+    if (e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault();
+      const slug = prompt('New page slug (e.g. about):'); if (!slug) return;
+      editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`); editor.setStyle(''); savePage(editor, `pages/${slug}.html`);
+    }
+    if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(editor); }
+  });
+
+  editor.on('load', () => toast('Authorized ✓  Editor loaded'));
+})();
