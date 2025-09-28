@@ -1,28 +1,20 @@
 /* =========================================================================
-   858 Builder — editor.js (Auth gate + 3D + Save + Pages)
+   858 Builder — editor.js (Auth gate + 3D + Save + Pages + Blocks open)
    ======================================================================= */
 
 const GH_OWNER  = 'farouk858';
 const GH_REPO   = 'farouk858-site';
 const GH_BRANCH = 'main';
-
-// Allowed editors (case-insensitive)
 const ALLOW_LIST = ['farouk858'];
 
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
-// inside grapesjs.init({ ... })
-plugins: ['blocks-core-858'],
-pluginsOpts: {},
-
-
-/* --- Capture token if Worker ever returns to editor.html --- */
+// Capture token if Worker returns here
 (function captureTokenFromHash() {
   const m = location.hash && location.hash.match(/access_token=([^&]+)/);
   if (m) {
     localStorage.setItem('gh_token', decodeURIComponent(m[1]));
     history.replaceState({}, document.title, location.pathname + location.search);
-    console.log('[editor] captured token from hash');
   }
 })();
 
@@ -44,22 +36,18 @@ function toast(msg, ms = 2000) {
   clearTimeout(el._t);
   el._t = setTimeout(() => (el.style.opacity = '0'), ms);
 }
-
 function token() { return localStorage.getItem('gh_token') || null; }
 
-/* ---------------- Hard gate: verify before booting GrapesJS ---------------- */
 async function verifyOrRedirect() {
   const t = token();
   if (!t) { window.location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
 
-  // Verify user
   const u = await fetch('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
   if (!u.ok) { window.location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
   const user = await u.json();
 
-  // ✅ Case-insensitive allow-list check
   const loginLower = (user.login || '').toLowerCase();
   const allowed = ALLOW_LIST.map(s => s.toLowerCase());
   if (!allowed.includes(loginLower)) {
@@ -67,7 +55,6 @@ async function verifyOrRedirect() {
     throw new Error('user-denied');
   }
 
-  // Repo + permission
   const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`, {
     headers: { Authorization: `Bearer ${t}`, Accept: 'application/vnd.github+json' }
   });
@@ -79,7 +66,7 @@ async function verifyOrRedirect() {
   return true;
 }
 
-/* ---------------- GitHub API helpers ---------------- */
+/* GitHub helpers */
 async function ghGet(path) {
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
@@ -108,7 +95,7 @@ async function putFile({ path, content, message, sha }) {
   return r.json();
 }
 
-/* ---------------- Build full HTML (inject global shortcut) ---------------- */
+/* Build full HTML (inject global shortcut) */
 function buildDocFromEditor(editor) {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
@@ -124,7 +111,7 @@ ${html}
 </body></html>`.trim();
 }
 
-/* ---------------- Pages helpers ---------------- */
+/* Pages helpers */
 async function listPages() {
   const root = await ghGet('');
   const pagesDir = await ghGet('pages');
@@ -139,7 +126,6 @@ async function listPages() {
   }
   return items;
 }
-
 async function loadPage(editor, path) {
   const meta = await ghGet(path);
   if (!meta) { toast('Page not found: ' + path, 2500); return; }
@@ -152,7 +138,6 @@ async function loadPage(editor, path) {
   updatePagesBadge();
   toast('Loaded: ' + path);
 }
-
 async function savePage(editor, path = CURRENT_PATH) {
   const doc = buildDocFromEditor(editor);
   let sha = await getFileSha(path);
@@ -169,14 +154,13 @@ async function savePage(editor, path = CURRENT_PATH) {
   updatePagesBadge();
   toast('Saved: ' + path);
 }
-
 function saveAsDialog(editor) {
   const slug = prompt('Save As — page slug (e.g. about):');
   if (!slug) return;
   savePage(editor, `pages/${slug}.html`);
 }
 
-/* ---------------- Pages Manager UI ---------------- */
+/* Pages UI */
 function updatePagesBadge() {
   const el = document.getElementById('pages-badge');
   if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}`;
@@ -248,7 +232,7 @@ function showPagesModal(editor, items) {
 /* ---------------- Main boot ---------------- */
 (async function main() {
   try {
-    await verifyOrRedirect();  // 🔒 stop here if not authorized
+    await verifyOrRedirect();
   } catch { return; }
 
   const editor = grapesjs.init({
@@ -265,8 +249,13 @@ function showPagesModal(editor, items) {
       ]
     },
     canvas: { scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'] },
+
+    // 🔹 Ensure blocks plugin is used
+    plugins: ['blocks-core-858'],
+    pluginsOpts: {},
   });
 
+  // Starter content (only once)
   if (!editor.getComponents().length) {
     editor.setComponents(`
       <section style="padding:40px 6vw; color:#fff; background:#000">
@@ -278,17 +267,27 @@ function showPagesModal(editor, items) {
           style="width:100%;height:420px;background:transparent"
           camera-controls auto-rotate disable-zoom
           exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
-      </section>
-    `);
+    </section>`);
   }
 
+  // Top bar buttons
   const panels = editor.Panels;
   panels.addButton('options', {
-    id: 'open-pages', label: 'Pages', className: 'gjs-pn-btn',
+    id: 'open-pages',
+    label: 'Pages',
+    className: 'gjs-pn-btn',
     attributes: { title: 'Pages Manager' },
     command: async () => { const items = await listPages(); showPagesModal(editor, items); }
   });
+  panels.addButton('options', {
+    id: 'open-blocks',
+    label: 'Blocks',
+    className: 'gjs-pn-btn',
+    attributes: { title: 'Toggle Blocks' },
+    command: () => editor.Blocks.open()
+  });
 
+  // Shortcuts
   document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(editor); }
     if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); (async () => { const items = await listPages(); showPagesModal(editor, items); })(); }
@@ -299,5 +298,11 @@ function showPagesModal(editor, items) {
     if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(editor); }
   });
 
-  editor.on('load', () => toast('Authorized ✓  Editor loaded'));
+  // 🔹 Open the Blocks panel on load
+  editor.on('load', () => {
+    editor.Blocks.open();
+    // Expand categories (safety)
+    editor.BlockManager.getCategories().forEach(cat => cat.set('open', true));
+    toast('Authorized ✓  Editor loaded');
+  });
 })();
