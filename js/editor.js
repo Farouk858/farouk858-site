@@ -11,7 +11,7 @@ const GH_BRANCH  = 'main';
 
 /* ---------- FEATURE FLAGS (turn on one-by-one once stable) ---------- */
 const ENABLE_BLOCKS_BASIC  = true; // grapesjsBlocksBasic
-const ENABLE_FORMS         = false; // grapesjsPluginForms
+const ENABLE_FORMS         = true; // grapesjsPluginForms
 const ENABLE_NAVBAR        = false; // grapesjsNavbar
 const ENABLE_TABS          = false; // grapesjsTabs
 const ENABLE_CUSTOM_CODE   = false; // grapesjsCustomCode
