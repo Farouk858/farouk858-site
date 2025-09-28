@@ -4,7 +4,7 @@
     const bm = editor.BlockManager;
     const domc = editor.DomComponents;
 
-    // -------- Blocks --------
+    // ---------- Blocks ----------
     bm.add('blk-section', {
       label: 'Section', category: 'Layout',
       content: `
@@ -65,56 +65,43 @@
                  exposure="1.2" shadow-intensity="1" environment-image="neutral"
                  style="width:100%; height:420px; background:transparent"></model-viewer>` });
 
-    // -------- Components (double-click to pick/upload) --------
+    // ---------- Component dbl-click pickers (reliable via view events) ----------
+    domc.addType('image', {
+      isComponent: el => el.tagName === 'IMG',
+      model: {},
+      view: {
+        events: { dblclick: 'openPicker' },
+        openPicker() {
+          window._858_pickAsset?.((url) => {
+            this.model.addAttributes({ src: url });
+          }, ['image/*']);
+        }
+      }
+    });
+
     domc.addType('video', {
       isComponent: el => el.tagName === 'VIDEO',
-      model: {
-        defaults: {
-          traits: [
-            { type: 'text', name: 'src', label: 'Source (mp4/webm)' },
-            { type: 'checkbox', name: 'autoplay' },
-            { type: 'checkbox', name: 'loop' },
-            { type: 'checkbox', name: 'muted' },
-            { type: 'checkbox', name: 'controls', value: true },
-          ],
-        },
-        init() {
-          this.on('dblclick', () => window._858_pickAsset?.((url) => {
-            this.addAttributes({ src: url });
-            const s = this.view.el.querySelector('source'); if (s) { s.src = url; this.view.el.load?.(); }
-          }, ['video/*']));
+      model: {},
+      view: {
+        events: { dblclick: 'openPicker' },
+        openPicker() {
+          window._858_pickAsset?.((url) => {
+            this.model.addAttributes({ src: url });
+            const s = this.el.querySelector('source'); if (s) { s.src = url; this.el.load?.(); }
+          }, ['video/*']);
         }
       }
     });
 
     domc.addType('model-viewer', {
       isComponent: el => el.tagName === 'MODEL-VIEWER',
-      model: {
-        defaults: {
-          traits: [
-            { type: 'text', name: 'src', label: 'Model (glb/gltf/usdz)' },
-            { type: 'text', name: 'poster', label: 'Poster (image)' },
-            { type: 'checkbox', name: 'camera-controls', label: 'Camera controls', value: true },
-            { type: 'checkbox', name: 'auto-rotate', label: 'Auto rotate', value: true },
-            { type: 'checkbox', name: 'disable-zoom', label: 'Disable zoom', value: true },
-          ],
-          droppable: false,
-        },
-        init() {
-          this.on('dblclick', () => window._858_pickAsset?.((url) => {
-            this.addAttributes({ src: url });
-          }, ['model/*','application/octet-stream','application/zip','application/octet-stream']));
-        }
-      }
-    });
-
-    domc.addType('image', {
-      isComponent: el => el.tagName === 'IMG',
-      model: {
-        init() {
-          this.on('dblclick', () => window._858_pickAsset?.((url) => {
-            this.addAttributes({ src: url });
-          }, ['image/*']));
+      model: { defaults: { droppable: false } },
+      view: {
+        events: { dblclick: 'openPicker' },
+        openPicker() {
+          window._858_pickAsset?.((url) => {
+            this.model.addAttributes({ src: url });
+          }, ['model/*','application/octet-stream']);
         }
       }
     });
