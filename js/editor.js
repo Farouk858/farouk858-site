@@ -1,6 +1,6 @@
 /* =========================================================================
    858 Builder — editor.js
-   Reliable save, pages, assets, and clear toasts
+   Adds right-side Assets Dock + working uploads + dblclick pickers + library
    ======================================================================= */
 
 const GH_OWNER  = 'farouk858';
@@ -11,7 +11,7 @@ const ALLOW_LIST = ['farouk858'];
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 let DIRTY = false;
 
-/* -------------- token helpers -------------- */
+/* ---------- token capture ---------- */
 (function captureTokenFromHash() {
   const m = location.hash && location.hash.match(/access_token=([^&]+)/);
   if (m) {
@@ -21,7 +21,7 @@ let DIRTY = false;
 })();
 const token = () => localStorage.getItem('gh_token') || null;
 
-/* -------------- UI helpers -------------- */
+/* ---------- toasts ---------- */
 function toast(msg, ms = 2600) {
   let el = document.getElementById('gh-toast');
   if (!el) {
@@ -29,7 +29,7 @@ function toast(msg, ms = 2600) {
     el.id = 'gh-toast';
     el.style.cssText = `
       position:fixed; right:16px; bottom:16px; z-index:99999;
-      background:rgba(0,0,0,.9); color:#fff; padding:10px 14px;
+      background:rgba(0,0,0,.92); color:#fff; padding:10px 14px;
       border-radius:10px; font:13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
       box-shadow:0 6px 20px rgba(0,0,0,.35); transition:opacity .2s; max-width:60ch;`;
     document.body.appendChild(el);
@@ -39,12 +39,9 @@ function toast(msg, ms = 2600) {
   clearTimeout(el._t);
   el._t = setTimeout(() => (el.style.opacity = '0'), ms);
 }
-function errToast(title, e) {
-  console.error(title, e);
-  toast(`${title}: ${e?.message || e}`, 4000);
-}
+const errToast = (t, e) => { console.error(t, e); toast(`${t}: ${e?.message || e}`, 4200); };
 
-/* -------------- auth gate -------------- */
+/* ---------- auth gate ---------- */
 async function verifyOrRedirect() {
   const t = token();
   if (!t) { location.replace('/farouk858-site/signin.html'); throw new Error('no-token'); }
@@ -54,7 +51,7 @@ async function verifyOrRedirect() {
   });
   if (!u.ok) { location.replace('/farouk858-site/signin.html'); throw new Error('user-bad'); }
   const user = await u.json();
-  if (!ALLOW_LIST.map(s => s.toLowerCase()).includes((user.login||'').toLowerCase())) {
+  if (!ALLOW_LIST.map(s=>s.toLowerCase()).includes((user.login||'').toLowerCase())) {
     location.replace('/farouk858-site/signin.html'); throw new Error('user-denied');
   }
 
@@ -65,18 +62,17 @@ async function verifyOrRedirect() {
   const repo = await r.json();
   const perm = repo.permissions || {};
   if (!perm.push && !perm.admin) { location.replace('/farouk858-site/signin.html'); throw new Error('no-perms'); }
-
   return true;
 }
 
-/* -------------- GitHub helpers -------------- */
+/* ---------- GitHub helpers ---------- */
 async function ghGet(path) {
   const r = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}?ref=${GH_BRANCH}&_=${Date.now()}`,
     { headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' } }
   );
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error('GET ' + path + ' failed: ' + r.status);
+  if (!r.ok) throw new Error(`GET ${path}: ${r.status}`);
   return r.json();
 }
 async function getFileSha(path) {
@@ -90,28 +86,34 @@ async function putFile({ path, content, message, sha }) {
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path)}`,
     { method: 'PUT', headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }
   );
-  if (!r.ok) throw new Error(`PUT ${path} failed ${r.status}: ${await r.text()}`);
+  if (!r.ok) throw new Error(`PUT ${path} ${r.status}: ${await r.text()}`);
   return r.json();
 }
-
-/* -------------- Asset upload (/assets) -------------- */
 const b64 = (str) => btoa(unescape(encodeURIComponent(str)));
-function slugFileName(name) {
-  return name.trim().toLowerCase().replace(/[^a-z0-9.\-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-}
+
+/* ---------- assets (/assets) ---------- */
+const slugFileName = (n) => n.trim().toLowerCase().replace(/[^a-z0-9.\-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
 async function uploadAssetToGitHub(file) {
   const buf = await file.arrayBuffer();
   const name = `${Date.now()}-${slugFileName(file.name)}`;
   const path = `assets/${name}`;
   await putFile({
     path,
-    content: btoa(String.fromCharCode(...new Uint8Array(buf))),
+    content: b64(String.fromCharCode(...new Uint8Array(buf))),
     message: `asset: ${name}`,
   });
-  return `assets/${name}`;
+  return `assets/${name}`; // Relative path served by Pages
+}
+async function loadExistingAssetsInto(am) {
+  const items = await ghGet('assets');
+  if (!Array.isArray(items)) return;
+  const toAdd = items
+    .filter(x => x.type === 'file')
+    .map(x => ({ src: `assets/${x.name}`, name: x.name }));
+  if (toAdd.length) am.add(toAdd);
 }
 
-/* -------------- Build document -------------- */
+/* ---------- document build ---------- */
 function buildDocFromEditor(editor) {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
@@ -127,10 +129,8 @@ ${html}
 </body></html>`.trim();
 }
 
-/* -------------- Pages helpers -------------- */
-function slugPageSlug(s) {
-  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-}
+/* ---------- pages ---------- */
+const slugPageSlug = (s) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
 async function listPages() {
   const root = await ghGet('');
   const pagesDir = await ghGet('pages');
@@ -153,52 +153,34 @@ async function loadPage(editor, path) {
     const tmp = document.createElement('html'); tmp.innerHTML = content;
     editor.setComponents((tmp.querySelector('body') || tmp).innerHTML);
     editor.setStyle((tmp.querySelector('style') || {}).textContent || '');
-    CURRENT_PATH = path;
-    localStorage.setItem('gjs-current-path', CURRENT_PATH);
-    DIRTY = false;
-    updatePagesBadge();
-    toast('Loaded: ' + path);
+    CURRENT_PATH = path; localStorage.setItem('gjs-current-path', CURRENT_PATH);
+    DIRTY = false; updatePagesBadge(); toast('Loaded: ' + path);
   } catch (e) { errToast('Load failed', e); }
 }
 async function savePage(editor, path = CURRENT_PATH) {
   try {
-    const full = buildDocFromEditor(editor);
-    const enc = b64(full);
+    const enc = b64(buildDocFromEditor(editor));
     let sha = await getFileSha(path);
-    try {
-      await putFile({ path, content: enc, message: `save: ${path} via editor`, sha });
-    } catch (e) {
-      if ((e.message||'').includes('409')) { // retry w/ fresh SHA
+    try { await putFile({ path, content: enc, message: `save: ${path} via editor`, sha }); }
+    catch (e) {
+      if ((e.message||'').includes('409')) {
         sha = await getFileSha(path);
         await putFile({ path, content: enc, message: `save: ${path} via editor (retry)`, sha });
-      } else { throw e; }
+      } else throw e;
     }
-    CURRENT_PATH = path;
-    localStorage.setItem('gjs-current-path', CURRENT_PATH);
-    DIRTY = false;
-    updatePagesBadge();
-    toast('Saved ✓ ' + path);
+    CURRENT_PATH = path; localStorage.setItem('gjs-current-path', CURRENT_PATH);
+    DIRTY = false; updatePagesBadge(); toast('Saved ✓ ' + path);
   } catch (e) { errToast('Save failed', e); }
 }
-function saveAsDialog(editor) {
-  const raw = prompt('Save As — page slug (e.g. home-page):');
-  if (!raw) return;
-  const slug = slugPageSlug(raw);
-  savePage(editor, `pages/${slug}.html`);
-}
 
-/* -------------- Pages UI -------------- */
+/* ---------- pages modal ---------- */
 function updatePagesBadge() {
   const el = document.getElementById('pages-badge');
-  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}${DIRTY ? ' • unsaved' : ''}`;
+  if (el) el.innerHTML = `<span style="opacity:.7">Page:</span> ${CURRENT_PATH}${DIRTY?' • unsaved':''}`;
 }
 function confirmIfDirty(cb) {
   if (!DIRTY) return cb();
-  if (confirm('You have unsaved changes. Save before continuing?')) {
-    cb('save');
-  } else {
-    cb('discard');
-  }
+  if (confirm('You have unsaved changes. Save before continuing?')) cb('save'); else cb('discard');
 }
 function showPagesModal(editor, items) {
   const listHtml = items.map(it => `
@@ -224,21 +206,21 @@ function showPagesModal(editor, items) {
       </div>
       <ul style="list-style:none;padding:0;margin:0;max-height:50vh;overflow:auto">${listHtml}</ul>
     </div>`;
-  const modal = editor.Modal;
-  modal.open({ title: 'Pages Manager', content: html });
+  const modal = editor.Modal; modal.open({ title: 'Pages Manager', content: html });
   updatePagesBadge();
   const root = modal.getContentEl();
 
   root.querySelector('#pg-new')?.addEventListener('click', async () => {
-    const slug = slugPageSlug(prompt('New page slug (e.g. home-page):') || '');
-    if (!slug) return;
+    const slug = slugPageSlug(prompt('New page slug (e.g. home-page):') || 'new-page');
     editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
-    editor.setStyle('');
-    await savePage(editor, `pages/${slug}.html`);
+    editor.setStyle(''); await savePage(editor, `pages/${slug}.html`);
     const again = await listPages(); showPagesModal(editor, again);
   });
   root.querySelector('#pg-save')?.addEventListener('click', async () => savePage(editor));
-  root.querySelector('#pg-saveas')?.addEventListener('click', () => saveAsDialog(editor));
+  root.querySelector('#pg-saveas')?.addEventListener('click', async () => {
+    const slug = slugPageSlug(prompt('Save As — page slug:', 'copy') || 'copy');
+    await savePage(editor, `pages/${slug}.html`);
+  });
   root.querySelector('#pg-reload')?.addEventListener('click', async () => {
     const again = await listPages(); showPagesModal(editor, again);
   });
@@ -250,24 +232,99 @@ function showPagesModal(editor, items) {
       const again = await listPages(); showPagesModal(editor, again);
     }));
   });
-
   root.querySelectorAll('button[data-dup]')?.forEach(btn => {
     btn.addEventListener('click', async () => {
       const src = btn.getAttribute('data-dup');
       const def = src.replace('.html','-copy.html');
-      const target = prompt(`Duplicate "${src}" to:`, def);
-      if (!target) return;
-      const meta = await ghGet(src);
-      const content = meta?.content ? meta.content : null;
-      if (!content) return;
-      await putFile({ path: target, content, message: `duplicate: ${target}` });
+      const target = prompt(`Duplicate "${src}" to:`, def); if (!target) return;
+      const meta = await ghGet(src); if (!meta?.content) return;
+      await putFile({ path: target, content: meta.content, message: `duplicate: ${target}` });
       const again = await listPages(); showPagesModal(editor, again);
       toast('Duplicated to: ' + target);
     });
   });
 }
 
-/* -------------- main -------------- */
+/* ---------- right-side Assets Dock ---------- */
+function mountAssetsDock(editor) {
+  const dock = document.createElement('div');
+  dock.id = 'am-dock';
+  dock.innerHTML = `
+    <style>
+      #am-dock{
+        position:fixed; top:64px; right:8px; bottom:8px; width:320px; z-index:9999;
+        background:rgba(12,12,12,.95); border:1px solid #222; border-radius:12px;
+        box-shadow:0 12px 40px rgba(0,0,0,.45); display:flex; flex-direction:column; overflow:hidden;
+      }
+      #am-head{ padding:10px 12px; display:flex; gap:8px; align-items:center; border-bottom:1px solid #222; }
+      #am-head strong{ color:#eee; font:600 13px system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
+      #am-body{ flex:1; min-height:0; }
+      #am-upload{ display:none; }
+      #am-actions{ margin-left:auto; display:flex; gap:8px; }
+      .am-btn{ padding:6px 10px; border-radius:8px; background:#1f6feb; color:#fff; border:0; cursor:pointer; font:600 12px system-ui; }
+      .am-btn.secondary{ background:#333; color:#ddd; }
+    </style>
+    <div id="am-head">
+      <strong>Assets</strong>
+      <div id="am-actions">
+        <button id="am-pick" class="am-btn">Upload</button>
+        <button id="am-open" class="am-btn secondary">Library</button>
+      </div>
+      <input id="am-upload" type="file" multiple accept="image/*,video/*,model/*,.glb,.gltf,.usdz" />
+    </div>
+    <div id="am-body"></div>
+  `;
+  document.body.appendChild(dock);
+
+  const am = editor.AssetManager;
+  // Render Asset Manager list inside the dock
+  am.render(dock.querySelector('#am-body'));
+
+  // Load existing /assets into the library once
+  loadExistingAssetsInto(am).catch(e => errToast('Load assets failed', e));
+
+  // Upload picker
+  const fileInput = dock.querySelector('#am-upload');
+  dock.querySelector('#am-pick').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async (e) => {
+    const files = e.target.files; if (!files?.length) return;
+    const added = [];
+    for (const f of files) {
+      try { added.push({ src: await uploadAssetToGitHub(f) }); }
+      catch (err) { errToast('Upload failed', err); }
+    }
+    if (added.length) am.add(added);
+    fileInput.value = '';
+  });
+
+  // Make the dock a drop zone
+  dock.addEventListener('dragover', e => { e.preventDefault(); });
+  dock.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files; if (!files?.length) return;
+    const added = [];
+    for (const f of files) {
+      try { added.push({ src: await uploadAssetToGitHub(f) }); }
+      catch (err) { errToast('Upload failed', err); }
+    }
+    if (added.length) am.add(added);
+  });
+
+  // Also expose a generic picker API for dbl-click handlers
+  window._858_pickAsset = (cb) => {
+    // Clicking “Library” focuses the AM; picking an item returns URL
+    am.open({});
+    const sel = (m) => {
+      const src = m && m.get && m.get('src');
+      if (src) cb(src);
+      am.off('select', sel);
+      // do not close; it lives in the dock
+    };
+    am.on('select', sel);
+  };
+}
+
+/* ---------- main ---------- */
 (async function main() {
   try { await verifyOrRedirect(); } catch { return; }
 
@@ -277,23 +334,9 @@ function showPagesModal(editor, items) {
     fromElement: false,
 
     assetManager: {
-      upload: true,
+      upload: false,            // we handle uploads via the dock
       embedAsBase64: false,
       autoAdd: true,
-      uploadText: 'Drop files here or click to upload. Files are saved to /assets in your repo.',
-      uploadFile: async (e) => {
-        const files = e.dataTransfer ? e.dataTransfer.files : e.target.files;
-        if (!files || !files.length) return;
-        const am = editor.AssetManager;
-        const added = [];
-        for (const file of files) {
-          try {
-            const url = await uploadAssetToGitHub(file);
-            added.push({ src: url });
-          } catch (err) { errToast('Upload failed', err); }
-        }
-        if (added.length) am.add(added);
-      },
     },
 
     styleManager: {
@@ -306,30 +349,13 @@ function showPagesModal(editor, items) {
 
     canvas: { scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js'] },
     plugins: ['blocks-core-858'],
-    pluginsOpts: {},
   });
 
-  // mark dirty on changes
+  // Dirty tracking
   editor.on('change', () => { DIRTY = true; updatePagesBadge(); });
-  window.addEventListener('beforeunload', (e) => {
-    if (!DIRTY) return;
-    e.preventDefault(); e.returnValue = '';
-  });
+  window.addEventListener('beforeunload', (e) => { if (!DIRTY) return; e.preventDefault(); e.returnValue = ''; });
 
-  // Expose picker to blocks: open Assets, return selected URL
-  window._858_pickAsset = function (cb) {
-    const am = editor.AssetManager;
-    am.open({});
-    const sel = (m) => {
-      const src = m && m.get && m.get('src');
-      if (src) cb(src);
-      am.off('select', sel);
-      am.close();
-    };
-    am.on('select', sel);
-  };
-
-  // Starter content if first time
+  // Starter content if blank
   if (!editor.getComponents().length) {
     editor.setComponents(`
       <section style="padding:40px 6vw; color:#fff; background:#000">
@@ -349,8 +375,7 @@ function showPagesModal(editor, items) {
   const panels = editor.Panels;
   panels.addButton('options', {
     id: 'save-now', label: 'Save', className: 'gjs-pn-btn',
-    attributes: { title: 'Save (Shift+S)' },
-    command: () => savePage(editor)
+    attributes: { title: 'Save (Shift+S)' }, command: () => savePage(editor)
   });
   panels.addButton('options', {
     id: 'open-pages', label: 'Pages', className: 'gjs-pn-btn',
@@ -359,16 +384,10 @@ function showPagesModal(editor, items) {
   });
   panels.addButton('options', {
     id: 'open-blocks', label: 'Blocks', className: 'gjs-pn-btn',
-    attributes: { title: 'Toggle Blocks' },
-    command: () => editor.Blocks.open()
-  });
-  panels.addButton('options', {
-    id: 'open-assets', label: 'Assets', className: 'gjs-pn-btn',
-    attributes: { title: 'Open Asset Manager' },
-    command: () => editor.AssetManager.open({})
+    attributes: { title: 'Toggle Blocks' }, command: () => editor.Blocks.open()
   });
 
-  // Keymaps (Undo/Redo + Save)
+  // Keymaps
   const km = editor.Keymaps;
   km.add('core:undo', 'meta+z');      km.add('core:redo', 'shift+meta+z');
   km.add('core:undo-ctrl', 'ctrl+z'); km.add('core:redo-ctrl', 'shift+ctrl+z');
@@ -377,13 +396,13 @@ function showPagesModal(editor, items) {
     if (e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); savePage(editor); }
     if (e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); (async () => { const items = await listPages(); showPagesModal(editor, items); })(); }
     if (e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault();
-      const slug = slugPageSlug(prompt('New page slug (e.g. home-page):') || '');
-      if (!slug) return;
-      editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`);
-      editor.setStyle('');
+      const slug = slugPageSlug(prompt('New page slug (e.g. home-page):') || 'new-page');
+      editor.setComponents(`<section style="padding:40px;color:#fff;background:#000"><h1>${slug}</h1><p>New page.</p></section>`); editor.setStyle('');
       savePage(editor, `pages/${slug}.html`);
     }
-    if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); saveAsDialog(editor); }
+    if (e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault();
+      const slug = slugPageSlug(prompt('Save As — page slug:', 'copy') || 'copy'); savePage(editor, `pages/${slug}.html`);
+    }
   });
 
   editor.on('load', () => {
@@ -391,5 +410,6 @@ function showPagesModal(editor, items) {
     editor.BlockManager.getCategories().forEach(cat => cat.set('open', true));
     updatePagesBadge();
     toast('Authorized ✓  Editor loaded');
+    mountAssetsDock(editor); // ← right-side Assets panel
   });
 })();
