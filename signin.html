@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>858 Builder — Sign in</title>
+  <style>
+    :root { color-scheme: dark; }
+    html,body { height:100%; margin:0; background:#0b0b0b; color:#eaeaea; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+    .wrap { min-height:100%; display:grid; place-items:center; padding:24px; }
+    .card {
+      width:min(560px,92vw); background:#111; border:1px solid #242424; border-radius:16px; padding:28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.05);
+    }
+    h1 { margin:0 0 6px; font-size:28px; }
+    p { margin:0 0 18px; opacity:.8; }
+    .btn {
+      appearance:none; border:0; border-radius:12px; padding:12px 16px; cursor:pointer;
+      background:#1f6feb; color:#fff; font-weight:700; letter-spacing:.2px;
+      box-shadow:0 10px 30px rgba(31,110,235,.35);
+    }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+    .muted { font-size:12px; opacity:.7; margin-top:14px }
+    .err { margin-top:12px; color:#ffb4b4; white-space:pre-wrap }
+    .ok  { margin-top:12px; color:#8aff9a }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    code { background:#191919; border:1px solid #242424; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Sign in to edit</h1>
+      <p>Only the GitHub user <code>farouk858</code> is allowed to open the editor.</p>
+
+      <div class="row" style="margin:14px 0 8px">
+        <button id="gh-login" class="btn">Sign in with GitHub</button>
+        <button id="go-editor" class="btn" style="background:#14b86a; display:none">Continue to Editor</button>
+      </div>
+
+      <div class="muted">
+        Tip: You can hit <strong>Shift + A</strong> on any page to come here again.
+      </div>
+
+      <div id="status" class="ok" style="display:none"></div>
+      <div id="error"  class="err" style="display:none"></div>
+    </div>
+  </div>
+
+  <script src="js/signin.js"></script>
+</body>
+</html>
