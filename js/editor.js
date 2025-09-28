@@ -11,6 +11,11 @@ const ALLOW_LIST = ['farouk858'];
 
 let CURRENT_PATH = localStorage.getItem('gjs-current-path') || 'index.html';
 
+// inside grapesjs.init({ ... })
+plugins: ['blocks-core-858'],
+pluginsOpts: {},
+
+
 /* --- Capture token if Worker ever returns to editor.html --- */
 (function captureTokenFromHash() {
   const m = location.hash && location.hash.match(/access_token=([^&]+)/);
