@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>858 Builder — Minimal Boot + 3D</title>
+  <title>858 Builder — Editor</title>
 
   <!-- GrapesJS (pinned) -->
   <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
@@ -11,74 +11,21 @@
     html,body { height:100%; margin:0; background:#0b0b0b; }
     #gjs { height:100vh; }
     .gjs-cv-canvas { background:#111; }
-    #error {
-      position:fixed; inset:auto 0 0 0; background:#1b1b1b; color:#ffb4b4;
-      font:12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      padding:10px 12px; border-top:1px solid #333; display:none; white-space:pre-wrap;
-    }
   </style>
 </head>
 <body>
   <div id="gjs"></div>
-  <div id="error"></div>
 
-  <!-- Core GrapesJS -->
+  <!-- GrapesJS core -->
   <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
 
-  <!-- Model Viewer for 3D -->
+  <!-- model-viewer both on host and inside the canvas iframe -->
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
-  <script>
-    (function(){
-      const showErr = (msg) => {
-        const el = document.getElementById('error');
-        el.style.display = 'block';
-        el.textContent = '[Boot Error] ' + msg;
-        console.error('[Boot Error]', msg);
-      };
+  <!-- Global auth helper (now iframe-aware) -->
+  <script src="js/auth.js"></script>
 
-      try {
-        const editor = grapesjs.init({
-          container: '#gjs',
-          height: '100vh',
-          fromElement: false,
-          storageManager: false,
-          canvas: {
-            // also load model-viewer inside the canvas iframe (belt & braces)
-            scripts: ['https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js']
-          }
-        });
-
-        // Starter content so we SEE something if it booted
-        editor.setComponents(`
-          <section style="padding:40px 6vw; color:#fff; background:#000">
-            <h1 style="margin:0 0 10px; font-family:system-ui">GrapesJS + 3D ✓</h1>
-            <p style="opacity:.75; font-family:system-ui">
-              If you see a rotating model below, 3D works.
-            </p>
-            <model-viewer src="models/sample.glb" alt="Sample 3D"
-              style="width:100%;height:420px;background:transparent"
-              camera-controls auto-rotate disable-zoom
-              exposure="1.2" shadow-intensity="1" environment-image="neutral"></model-viewer>
-          </section>
-        `);
-
-        editor.on('load', () => console.log('[gjs] loaded OK'));
-      } catch (e) {
-        showErr(e && e.message ? e.message : String(e));
-      }
-
-      // Catch runtime errors after load
-      window.addEventListener('error', (ev) => {
-        const msg = (ev && ev.message) ? ev.message : 'Unknown runtime error';
-        const file = ev && ev.filename ? ` @ ${ev.filename}:${ev.lineno}:${ev.colno}` : '';
-        const detail = msg + file;
-        const el = document.getElementById('error');
-        el.style.display = 'block';
-        el.textContent = '[Runtime Error] ' + detail;
-        console.error('[Runtime Error]', ev);
-      });
-    })();
-  </script>
+  <!-- Main editor (save, pages, etc.) -->
+  <script src="js/editor.js"></script>
 </body>
 </html>
