@@ -3,39 +3,71 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>858 Builder</title>
+  <title>858 Builder — Minimal Boot Test</title>
 
-  <!-- GrapesJS core CSS (pinned working version) -->
+  <!-- GrapesJS (pinned) -->
   <link rel="stylesheet" href="https://unpkg.com/grapesjs@0.21.9/dist/css/grapes.min.css" />
   <style>
-    html, body { height:100%; margin:0; background:#0b0b0b; }
+    html,body { height:100%; margin:0; background:#0b0b0b; }
     #gjs { height:100vh; }
     .gjs-cv-canvas { background:#111; }
+    #error {
+      position:fixed; inset:auto 0 0 0; background:#1b1b1b; color:#ffb4b4;
+      font:12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      padding:10px 12px; border-top:1px solid #333; display:none; white-space:pre-wrap;
+    }
   </style>
 </head>
 <body>
   <div id="gjs"></div>
+  <div id="error"></div>
 
-  <!-- (Optional) Global auth helper: Shift+A anywhere -->
-  <script src="js/auth.js"></script>
-
-  <!-- Core GrapesJS FIRST -->
   <script src="https://unpkg.com/grapesjs@0.21.9/dist/grapes.min.js"></script>
+  <script>
+    (function(){
+      const showErr = (msg) => {
+        const el = document.getElementById('error');
+        el.style.display = 'block';
+        el.textContent = '[Boot Error] ' + msg;
+        console.error('[Boot Error]', msg);
+      };
 
-  <!-- Your custom plugins (no dependency on external bundles) -->
-  <script src="js/model-plugin.js"></script>    <!-- exposes window.modelViewerPlugin -->
-  <script src="js/blocks-plugin.js"></script>   <!-- exposes window.blocksPlugin -->
+      try {
+        const editor = grapesjs.init({
+          container: '#gjs',
+          height: '100vh',
+          fromElement: false,
+          storageManager: false
+        });
 
-  <!-- Optional external plugins (commented out; enable later after it works) -->
-  <!--
-  <script src="https://unpkg.com/grapesjs-blocks-basic@1.0.2"></script>       <!~~ global: grapesjsBlocksBasic ~~>
-  <script src="https://unpkg.com/grapesjs-plugin-forms@2.0.6"></script>       <!~~ global: grapesjsPluginForms ~~>
-  <script src="https://unpkg.com/grapesjs-navbar@1.0.9"></script>             <!~~ global: grapesjsNavbar ~~>
-  <script src="https://unpkg.com/grapesjs-tabs@1.0.6"></script>               <!~~ global: grapesjsTabs ~~>
-  <script src="https://unpkg.com/grapesjs-custom-code@1.0.3"></script>        <!~~ global: grapesjsCustomCode ~~>
-  -->
+        // Very simple starter content so we SEE something if it booted
+        if (!editor.getComponents().length) {
+          editor.setComponents(`
+            <section style="padding:40px 6vw; color:#fff; background:#000">
+              <h1 style="margin:0 0 10px; font-family:system-ui">GrapesJS booted ✓</h1>
+              <p style="opacity:.75; font-family:system-ui">
+                If you can read this, the editor mounted correctly.
+              </p>
+            </section>
+          `);
+        }
 
-  <!-- Main editor (defensive; feature flags inside) -->
-  <script src="js/editor.js"></script>
+        editor.on('load', () => console.log('[gjs] loaded OK'));
+      } catch (e) {
+        showErr(e && e.message ? e.message : String(e));
+      }
+
+      // Also catch runtime errors after load
+      window.addEventListener('error', (ev) => {
+        const msg = (ev && ev.message) ? ev.message : 'Unknown runtime error';
+        const file = ev && ev.filename ? ` @ ${ev.filename}:${ev.lineno}:${ev.colno}` : '';
+        const detail = msg + file;
+        const el = document.getElementById('error');
+        el.style.display = 'block';
+        el.textContent = '[Runtime Error] ' + detail;
+        console.error('[Runtime Error]', ev);
+      });
+    })();
+  </script>
 </body>
 </html>
