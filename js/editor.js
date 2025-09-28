@@ -1,5 +1,5 @@
 /* =========================================================================
-   858 Builder — editor.js (stable: 3D + Save + Pages + top-bar Sign in)
+   858 Builder — editor.js (3D + Save + Pages + global-shortcuts injection)
    ======================================================================= */
 
 /* ---------- CONFIG ---------- */
@@ -104,6 +104,7 @@ async function putFile({ path, content, message, sha }) {
 }
 
 /* ---------------- Save/Load pages ---------------- */
+// ✅ Updated: inject global-shortcuts.js automatically
 function buildDocFromEditor() {
   const html = editor.getHtml({ cleanId: true });
   const css  = editor.getCss();
@@ -115,8 +116,12 @@ function buildDocFromEditor() {
 <style>${css}</style>
 </head><body>
 ${html}
+
+<!-- Always inject global shortcuts -->
+<script src="js/global-shortcuts.js"></script>
 </body></html>`.trim();
 }
+
 async function loadPage(path) {
   if (!isAuthed()) { toast('Sign in first (Shift + A)'); return; }
   const meta = await ghGet(path);
@@ -275,18 +280,5 @@ document.addEventListener('keydown', (e) => {
 /* On load */
 editor.on('load', () => {
   console.log('[gjs] loaded OK');
-  // Also try to bind into the canvas iframe for Shift+A (extra safety)
-  try {
-    const ifr = editor.Canvas.getFrameEl();
-    if (ifr?.contentWindow) {
-      ifr.contentWindow.addEventListener('keydown', (ev) => {
-        if (ev.shiftKey && (ev.key || '').toLowerCase() === 'a') {
-          ev.preventDefault(); ev.stopPropagation();
-          window.location.href = 'https://858-builder.faroukalaofa.workers.dev/login';
-        }
-      }, true);
-    }
-  } catch {}
+  if (isAuthed()) toast(`Signed in ✓  Editing: ${CURRENT_PATH}`);
 });
-
-if (isAuthed()) toast(`Signed in ✓  Editing: ${CURRENT_PATH}`);
